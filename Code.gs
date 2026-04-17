@@ -7992,7 +7992,6 @@ function collectSupabaseSeedData_(ss, fallbackPayload) {
   if (ss) {
     var loansSheet = ss.getSheetByName('Loans');
     var membersSheet = ss.getSheetByName('Members');
-    var transactionsSheet = ss.getSheetByName('Transactions');
     var settingsSheet = ss.getSheetByName('Settings');
     var usersSheet = ss.getSheetByName(USERS_SHEET_NAME);
     var auditLogsSheet = ss.getSheetByName(AUDIT_LOGS_SHEET_NAME);
@@ -8010,10 +8009,13 @@ function collectSupabaseSeedData_(ss, fallbackPayload) {
       if (normalizedMember) result.members.push(normalizedMember);
     }
 
-    var transactionRows = readSheetRowsAsObjects_(transactionsSheet);
-    for (var k = 0; k < transactionRows.length; k++) {
-      var normalizedTransaction = buildSupabaseTransactionRow_(transactionRows[k], nowIso);
-      if (normalizedTransaction) result.transactions.push(normalizedTransaction);
+    var transactionSheets = listCurrentTransactionSheets_(ss).concat(listAllTransactionArchiveSheets_(ss));
+    for (var ts = 0; ts < transactionSheets.length; ts++) {
+      var transactionRows = readSheetRowsAsObjects_(transactionSheets[ts]);
+      for (var k = 0; k < transactionRows.length; k++) {
+        var normalizedTransaction = buildSupabaseTransactionRow_(transactionRows[k], nowIso);
+        if (normalizedTransaction) result.transactions.push(normalizedTransaction);
+      }
     }
 
     var settingsRows = readSheetRowsAsObjects_(settingsSheet);
