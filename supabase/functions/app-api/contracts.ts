@@ -84,5 +84,5 @@ export const backendMethodGroups: BackendMethodGroup[] = [
 ];
 
 export const backendMethodNames = backendMethodGroups.flatMap((group) =>
-  group.methods.map((method) => method.name),
+  group.methods.map((method) => method.name)
 );

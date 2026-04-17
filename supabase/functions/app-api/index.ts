@@ -37,12 +37,16 @@ const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOGIN_LOCKOUT_SECONDS = 15 * 60;
 
-const loginAttemptState = new Map<string, { attempts: number; expiresAt: number }>();
+const loginAttemptState = new Map<
+  string,
+  { attempts: number; expiresAt: number }
+>();
 const loginLockState = new Map<string, number>();
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -83,7 +87,11 @@ const json = (status: number, body: unknown) =>
 
 const success = (body: JsonObject) => json(200, { status: "Success", ...body });
 
-const appError = (message: string, code = "APP_ERROR", extra: JsonObject = {}) =>
+const appError = (
+  message: string,
+  code = "APP_ERROR",
+  extra: JsonObject = {},
+) =>
   json(200, {
     status: "Error",
     code,
@@ -95,7 +103,8 @@ const notImplemented = (method: string) =>
   json(501, {
     status: "Error",
     code: "NOT_IMPLEMENTED",
-    message: `Supabase backend scaffold is ready, but method '${method}' is not implemented yet.`,
+    message:
+      `Supabase backend scaffold is ready, but method '${method}' is not implemented yet.`,
   });
 
 const normalizeText = (value: unknown) => String(value ?? "").trim();
@@ -112,32 +121,41 @@ const normalizeUserStatus = (value: unknown) => {
   if (!status) return USER_STATUS_PENDING;
   const lower = status.toLowerCase();
   if (lower === "active") return USER_STATUS_ACTIVE;
-  if (["suspended", "banned", "disabled", "inactive"].includes(lower)) return USER_STATUS_SUSPENDED;
-  if (["pending", "waiting", "awaiting_approval"].includes(lower)) return USER_STATUS_PENDING;
+  if (["suspended", "banned", "disabled", "inactive"].includes(lower)) {
+    return USER_STATUS_SUSPENDED;
+  }
+  if (["pending", "waiting", "awaiting_approval"].includes(lower)) {
+    return USER_STATUS_PENDING;
+  }
   return status;
 };
 
-const getPermissionCatalog = () => PERMISSION_CATALOG.map((item) => ({ ...item }));
+const getPermissionCatalog = () =>
+  PERMISSION_CATALOG.map((item) => ({ ...item }));
 const getAllPermissionKeys = () => PERMISSION_CATALOG.map((item) => item.key);
 
 const getDefaultPermissionMapByRole = (role: unknown) => {
   const normalizedRole = normalizeRole(role);
-  const map = Object.fromEntries(getAllPermissionKeys().map((key) => [key, false]));
+  const map = Object.fromEntries(
+    getAllPermissionKeys().map((key) => [key, false]),
+  );
   if (normalizedRole === "admin") {
     for (const key of getAllPermissionKeys()) map[key] = true;
     return map;
   }
-  for (const key of [
-    "dashboard.view",
-    "payments.create",
-    "payment_records.view",
-    "qualifications.view",
-    "members.view",
-    "loans.view",
-    "reports.view",
-    "reports.export",
-    "profile.view",
-  ]) {
+  for (
+    const key of [
+      "dashboard.view",
+      "payments.create",
+      "payment_records.view",
+      "qualifications.view",
+      "members.view",
+      "loans.view",
+      "reports.view",
+      "reports.export",
+      "profile.view",
+    ]
+  ) {
     map[key] = true;
   }
   return map;
@@ -145,11 +163,15 @@ const getDefaultPermissionMapByRole = (role: unknown) => {
 
 const parsePermissionsJson = (value: unknown): Record<string, boolean> => {
   if (Array.isArray(value)) {
-    return Object.fromEntries(value.map((item) => [normalizeText(item), true]).filter(([key]) => key));
+    return Object.fromEntries(
+      value.map((item) => [normalizeText(item), true]).filter(([key]) => key),
+    );
   }
   if (value && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>).map(([key, enabled]) => [normalizeText(key), !!enabled]).filter(([key]) => key),
+      Object.entries(value as Record<string, unknown>).map((
+        [key, enabled],
+      ) => [normalizeText(key), !!enabled]).filter(([key]) => key),
     );
   }
   const text = normalizeText(value);
@@ -161,7 +183,10 @@ const parsePermissionsJson = (value: unknown): Record<string, boolean> => {
   }
 };
 
-const getEffectivePermissions = (userRow: SupabaseRow | null, roleOverride?: string) => {
+const getEffectivePermissions = (
+  userRow: SupabaseRow | null,
+  roleOverride?: string,
+) => {
   const role = normalizeRole(roleOverride ?? userRow?.role);
   const baseMap = getDefaultPermissionMapByRole(role);
   if (role !== "admin") {
@@ -177,20 +202,35 @@ const getEffectivePermissions = (userRow: SupabaseRow | null, roleOverride?: str
 
 const hasPermission = (session: SessionData, permissionKey: string) => {
   if (normalizeRole(session.role) === "admin") return true;
-  const permissions = Array.isArray(session.permissions) ? session.permissions : [];
+  const permissions = Array.isArray(session.permissions)
+    ? session.permissions
+    : [];
   return permissions.includes(permissionKey);
 };
 
-const requirePermission = (session: SessionData, permissionKey: string, friendlyMessage: string) => {
+const requirePermission = (
+  session: SessionData,
+  permissionKey: string,
+  friendlyMessage: string,
+) => {
   if (hasPermission(session, permissionKey)) return;
-  throw new Error(friendlyMessage || `FORBIDDEN: missing permission ${permissionKey}`);
+  throw new Error(
+    friendlyMessage || `FORBIDDEN: missing permission ${permissionKey}`,
+  );
 };
 
-const requireAnyPermission = (session: SessionData, permissionKeys: string[], friendlyMessage: string) => {
+const requireAnyPermission = (
+  session: SessionData,
+  permissionKeys: string[],
+  friendlyMessage: string,
+) => {
   for (const permissionKey of permissionKeys) {
     if (hasPermission(session, permissionKey)) return;
   }
-  throw new Error(friendlyMessage || `FORBIDDEN: missing any permission ${permissionKeys.join(", ")}`);
+  throw new Error(
+    friendlyMessage ||
+      `FORBIDDEN: missing any permission ${permissionKeys.join(", ")}`,
+  );
 };
 
 const parseBooleanEnv = (value: string | undefined, fallback: boolean) => {
@@ -201,36 +241,57 @@ const parseBooleanEnv = (value: string | undefined, fallback: boolean) => {
 
 const getEnv = () => {
   const supabaseUrl = normalizeText(Deno.env.get("SUPABASE_URL"));
-  const serviceRoleKey = normalizeText(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
-  const loginRequired = parseBooleanEnv(Deno.env.get("APP_LOGIN_REQUIRED"), false);
+  const serviceRoleKey = normalizeText(
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"),
+  );
+  const loginRequired = parseBooleanEnv(
+    Deno.env.get("APP_LOGIN_REQUIRED"),
+    false,
+  );
   const sessionSigningSecret =
     normalizeText(Deno.env.get("APP_SESSION_SIGNING_SECRET")) ||
     normalizeText(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY"));
-  const pinUniquePepper = normalizeText(Deno.env.get("PIN_UNIQUE_PEPPER")) || "PIN_UNIQUE_PEPPER_DEFAULT";
-  return { supabaseUrl, serviceRoleKey, loginRequired, sessionSigningSecret, pinUniquePepper };
+  const pinUniquePepper = normalizeText(Deno.env.get("PIN_UNIQUE_PEPPER")) ||
+    "PIN_UNIQUE_PEPPER_DEFAULT";
+  return {
+    supabaseUrl,
+    serviceRoleKey,
+    loginRequired,
+    sessionSigningSecret,
+    pinUniquePepper,
+  };
 };
 
 const ensureConfigured = () => {
   const env = getEnv();
   if (!env.supabaseUrl || !env.serviceRoleKey) {
-    throw new Error("Supabase Edge Function ยังไม่ได้ตั้งค่า SUPABASE_URL หรือ SUPABASE_SERVICE_ROLE_KEY");
+    throw new Error(
+      "Supabase Edge Function ยังไม่ได้ตั้งค่า SUPABASE_URL หรือ SUPABASE_SERVICE_ROLE_KEY",
+    );
   }
   if (!env.sessionSigningSecret) {
-    throw new Error("Supabase Edge Function ยังไม่ได้ตั้งค่า APP_SESSION_SIGNING_SECRET");
+    throw new Error(
+      "Supabase Edge Function ยังไม่ได้ตั้งค่า APP_SESSION_SIGNING_SECRET",
+    );
   }
   return env;
 };
 
-const pad2 = (value: number) => String(Math.max(0, Math.trunc(value || 0))).padStart(2, "0");
+const pad2 = (value: number) =>
+  String(Math.max(0, Math.trunc(value || 0))).padStart(2, "0");
 
 const formatThaiDate = (input = new Date()) => {
   const date = new Date(input);
-  return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear() + 543}`;
+  return `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${
+    date.getFullYear() + 543
+  }`;
 };
 
 const formatThaiDateTime = (input = new Date()) => {
   const date = new Date(input);
-  return `${formatThaiDate(date)} ${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+  return `${formatThaiDate(date)} ${pad2(date.getHours())}:${
+    pad2(date.getMinutes())
+  }:${pad2(date.getSeconds())}`;
 };
 
 const parseThaiDateParts = (value: unknown) => {
@@ -255,7 +316,9 @@ const parseThaiDateParts = (value: unknown) => {
     minute: Number(timeMatch?.[2] || 0),
     second: Number(timeMatch?.[3] || 0),
   };
-  const slashMatch = text.split(" ")[0]?.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  const slashMatch = text.split(" ")[0]?.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/,
+  );
   if (slashMatch) {
     const day = Number(slashMatch[1]);
     const month = Number(slashMatch[2]);
@@ -266,7 +329,9 @@ const parseThaiDateParts = (value: unknown) => {
       yearBe,
       ...time,
       dateOnly: `${pad2(day)}/${pad2(month)}/${yearBe}`,
-      dateTime: `${pad2(day)}/${pad2(month)}/${yearBe} ${pad2(time.hour)}:${pad2(time.minute)}:${pad2(time.second)}`,
+      dateTime: `${pad2(day)}/${pad2(month)}/${yearBe} ${pad2(time.hour)}:${
+        pad2(time.minute)
+      }:${pad2(time.second)}`,
     };
   }
   const isoMatch = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
@@ -280,7 +345,9 @@ const parseThaiDateParts = (value: unknown) => {
       yearBe,
       ...time,
       dateOnly: `${pad2(day)}/${pad2(month)}/${yearBe}`,
-      dateTime: `${pad2(day)}/${pad2(month)}/${yearBe} ${pad2(time.hour)}:${pad2(time.minute)}:${pad2(time.second)}`,
+      dateTime: `${pad2(day)}/${pad2(month)}/${yearBe} ${pad2(time.hour)}:${
+        pad2(time.minute)
+      }:${pad2(time.second)}`,
     };
   }
   const nativeDate = new Date(text.replace(/\s*\([^)]*\)\s*$/, ""));
@@ -291,11 +358,17 @@ const parseThaiDateParts = (value: unknown) => {
 };
 
 const getCurrentThaiMonthContext = () => {
-  const parts = parseThaiDateParts(new Date()) || { month: new Date().getMonth() + 1, yearBe: new Date().getFullYear() + 543 };
+  const parts = parseThaiDateParts(new Date()) ||
+    {
+      month: new Date().getMonth() + 1,
+      yearBe: new Date().getFullYear() + 543,
+    };
   return {
     month: Number(parts.month) || new Date().getMonth() + 1,
     yearBe: Number(parts.yearBe) || new Date().getFullYear() + 543,
-    monthKey: `${Number(parts.yearBe) || new Date().getFullYear() + 543}-${pad2(Number(parts.month) || new Date().getMonth() + 1)}`,
+    monthKey: `${Number(parts.yearBe) || new Date().getFullYear() + 543}-${
+      pad2(Number(parts.month) || new Date().getMonth() + 1)
+    }`,
   };
 };
 
@@ -374,7 +447,8 @@ const getAuditLogs = async (payload: RpcPayload) => {
     reason: normalizeText(row.reason),
     details: normalizeText(row.details),
   })).filter((record) => {
-    return record.timestamp || record.action || record.entityId || record.details;
+    return record.timestamp || record.action || record.entityId ||
+      record.details;
   });
 
   return { records: records.slice(0, limit) } as JsonObject;
@@ -385,7 +459,9 @@ const shouldCountSelectedMonthAsDueForOverdueReport = (
   reportMonth: number,
   lastClosedAccountingMonthKey: unknown,
 ) => {
-  const selectedMonthKey = `${Number(reportYearBe) || 0}-${pad2(Number(reportMonth) || 1)}`;
+  const selectedMonthKey = `${Number(reportYearBe) || 0}-${
+    pad2(Number(reportMonth) || 1)
+  }`;
   const closedMonthKey = normalizeText(lastClosedAccountingMonthKey);
   if (/^\d{4}-\d{2}$/.test(closedMonthKey)) {
     return selectedMonthKey <= closedMonthKey;
@@ -393,15 +469,18 @@ const shouldCountSelectedMonthAsDueForOverdueReport = (
   return selectedMonthKey < getCurrentThaiMonthContext().monthKey;
 };
 
-const normalizeLoanCreatedAt = (value: unknown) => parseThaiDateParts(value)?.dateOnly || "";
+const normalizeLoanCreatedAt = (value: unknown) =>
+  parseThaiDateParts(value)?.dateOnly || "";
 
-const normalizeTransactionStatus = (status: unknown) => normalizeText(status) || "ปกติ";
+const normalizeTransactionStatus = (status: unknown) =>
+  normalizeText(status) || "ปกติ";
 const isInactiveTransactionStatus = (status: unknown) => {
   const normalized = normalizeTransactionStatus(status);
   return normalized === "ยกเลิก" || normalized === "กลับรายการ";
 };
 
-const normalizeTextForMatch = (value: unknown) => String(value ?? "").replace(/\s+/g, " ").trim();
+const normalizeTextForMatch = (value: unknown) =>
+  String(value ?? "").replace(/\s+/g, " ").trim();
 
 const validateRequiredTextField = (value: unknown, label: string) => {
   const normalized = normalizeTextForMatch(value);
@@ -409,7 +488,9 @@ const validateRequiredTextField = (value: unknown, label: string) => {
   return normalized;
 };
 
-const validateMemberPayloadForWrite = (memberData: Record<string, unknown>) => ({
+const validateMemberPayloadForWrite = (
+  memberData: Record<string, unknown>,
+) => ({
   id: validateRequiredTextField(memberData.id, "รหัสสมาชิก"),
   name: validateRequiredTextField(memberData.name, "ชื่อ-สกุลสมาชิก"),
   status: normalizeTextForMatch(memberData.status) || "ปกติ",
@@ -425,7 +506,10 @@ const validateLoanPayloadForWrite = (loanData: Record<string, unknown>) => {
     balance: Number(loanData.balance),
     status: normalizeTextForMatch(loanData.status) || "ปกติ",
     nextPayment: String(loanData.nextPayment || "-").trim() || "-",
-    missedInterestMonths: Math.max(0, Number(loanData.missedInterestMonths) || 0),
+    missedInterestMonths: Math.max(
+      0,
+      Number(loanData.missedInterestMonths) || 0,
+    ),
     createdAt: loanData.createdAt,
     guarantor1: String(loanData.guarantor1 || ""),
     guarantor2: String(loanData.guarantor2 || ""),
@@ -446,7 +530,8 @@ const validateLoanPayloadForWrite = (loanData: Record<string, unknown>) => {
   return normalized;
 };
 
-const normalizeMemberNameKey = (value: unknown) => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+const normalizeMemberNameKey = (value: unknown) =>
+  String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
 
 const parseGuarantorInputParts = (value: unknown) => {
   const rawText = normalizeTextForMatch(value);
@@ -499,7 +584,11 @@ const extractMemberIdFromGuarantorText = (value: unknown) => {
   return "";
 };
 
-const guarantorReferenceMatchesMember = (guarantorText: unknown, memberId: unknown, memberName: unknown) => {
+const guarantorReferenceMatchesMember = (
+  guarantorText: unknown,
+  memberId: unknown,
+  memberName: unknown,
+) => {
   const text = normalizeTextForMatch(guarantorText);
   const id = normalizeTextForMatch(memberId);
   const name = normalizeTextForMatch(memberName);
@@ -510,9 +599,14 @@ const guarantorReferenceMatchesMember = (guarantorText: unknown, memberId: unkno
   return !!(id && extractedId && extractedId === id);
 };
 
-const isTemporaryGuarantorStatus = (status: unknown) => normalizeTextForMatch(status) === TEMP_GUARANTOR_STATUS;
+const isTemporaryGuarantorStatus = (status: unknown) =>
+  normalizeTextForMatch(status) === TEMP_GUARANTOR_STATUS;
 
-const deriveLoanStatusFromState = (balance: unknown, missedMonths: unknown, fallbackStatus: unknown) => {
+const deriveLoanStatusFromState = (
+  balance: unknown,
+  missedMonths: unknown,
+  fallbackStatus: unknown,
+) => {
   const remainingBalance = Number(balance) || 0;
   const arrears = Number(missedMonths) || 0;
   const fallback = normalizeText(fallbackStatus);
@@ -523,7 +617,10 @@ const deriveLoanStatusFromState = (balance: unknown, missedMonths: unknown, fall
   return fallback || "ปกติ";
 };
 
-const normalizeJsonSetting = <T extends JsonValue>(value: unknown, fallback: T): T => {
+const normalizeJsonSetting = <T extends JsonValue>(
+  value: unknown,
+  fallback: T,
+): T => {
   if (value === null || value === undefined || value === "") return fallback;
   if (typeof value === "string") {
     try {
@@ -536,7 +633,10 @@ const normalizeJsonSetting = <T extends JsonValue>(value: unknown, fallback: T):
   return fallback;
 };
 
-const buildDashboardOverviewStatsFromLoans = (loansData: Array<Record<string, unknown>>, totalMembers: number) => {
+const buildDashboardOverviewStatsFromLoans = (
+  loansData: Array<Record<string, unknown>>,
+  totalMembers: number,
+) => {
   const summary = {
     totalLoanAmount: 0,
     totalOutstandingBalance: 0,
@@ -558,14 +658,17 @@ const buildDashboardOverviewStatsFromLoans = (loansData: Array<Record<string, un
     if (status === "รออนุมัติ") summary.pendingApprovalCount += 1;
     if (status.includes("ค้างชำระ")) summary.nplCount += 1;
   }
-  summary.nplRatio = loansData.length > 0 ? ((summary.nplCount / loansData.length) * 100).toFixed(1) : "0.0";
+  summary.nplRatio = loansData.length > 0
+    ? ((summary.nplCount / loansData.length) * 100).toFixed(1)
+    : "0.0";
   return summary;
 };
 
 const toBytes = (value: string) => new TextEncoder().encode(value);
 const bytesToString = (value: Uint8Array) => new TextDecoder().decode(value);
 
-const bytesToHex = (value: Uint8Array) => Array.from(value).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+const bytesToHex = (value: Uint8Array) =>
+  Array.from(value).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 
 const sha256Hex = async (value: string) => {
   const digest = await crypto.subtle.digest("SHA-256", toBytes(value));
@@ -573,11 +676,13 @@ const sha256Hex = async (value: string) => {
 };
 
 const base64UrlEncode = (input: Uint8Array) =>
-  btoa(String.fromCharCode(...input)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  btoa(String.fromCharCode(...input)).replace(/\+/g, "-").replace(/\//g, "_")
+    .replace(/=+$/g, "");
 
 const base64UrlDecode = (input: string) => {
   const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = normalized + "=".repeat((4 - (normalized.length % 4 || 4)) % 4);
+  const padded = normalized +
+    "=".repeat((4 - (normalized.length % 4 || 4)) % 4);
   const binary = atob(padded);
   return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 };
@@ -594,8 +699,10 @@ const signHmac = async (secret: string, payload: string) => {
   return base64UrlEncode(new Uint8Array(signature));
 };
 
-const normalizePinInput = (value: unknown) => String(value ?? "").replace(/\D/g, "").trim();
-const isValidSixDigitPin = (value: unknown) => /^\d{6}$/.test(String(value ?? "").trim());
+const normalizePinInput = (value: unknown) =>
+  String(value ?? "").replace(/\D/g, "").trim();
+const isValidSixDigitPin = (value: unknown) =>
+  /^\d{6}$/.test(String(value ?? "").trim());
 
 const computePinUniqueKey = async (pinValue: unknown) => {
   const pin = normalizePinInput(pinValue);
@@ -604,7 +711,11 @@ const computePinUniqueKey = async (pinValue: unknown) => {
   return sha256Hex(`${pin}|${pinUniquePepper}`);
 };
 
-const buildStrongPasswordHash = async (password: unknown, salt: unknown, iterations: unknown) => {
+const buildStrongPasswordHash = async (
+  password: unknown,
+  salt: unknown,
+  iterations: unknown,
+) => {
   const safePassword = normalizeText(password);
   const safeSalt = normalizeText(salt);
   const rounds = Math.max(1000, Number(iterations) || 10000);
@@ -615,7 +726,10 @@ const buildStrongPasswordHash = async (password: unknown, salt: unknown, iterati
   return digestInput;
 };
 
-const verifyPasswordAgainstStoredHash = async (password: unknown, storedHash: unknown) => {
+const verifyPasswordAgainstStoredHash = async (
+  password: unknown,
+  storedHash: unknown,
+) => {
   const safeStoredHash = normalizeText(storedHash);
   if (!safeStoredHash) return false;
   if (/^v2\$\d+\$[A-Za-z0-9]+\$[a-f0-9]{64}$/i.test(safeStoredHash)) {
@@ -623,7 +737,8 @@ const verifyPasswordAgainstStoredHash = async (password: unknown, storedHash: un
     const iterations = Number(parts[1]) || 10000;
     const salt = parts[2] || "";
     const expected = parts[3] || "";
-    return await buildStrongPasswordHash(password, salt, iterations) === expected;
+    return await buildStrongPasswordHash(password, salt, iterations) ===
+      expected;
   }
   return await sha256Hex(String(password ?? "")) === safeStoredHash;
 };
@@ -644,13 +759,18 @@ const registerFailedLoginAttempt = (identity: unknown) => {
   if (!normalized) return { locked: false, attempts: 0 };
   const now = Date.now();
   const current = loginAttemptState.get(normalized);
-  const attempts = current && current.expiresAt > now ? current.attempts + 1 : 1;
+  const attempts = current && current.expiresAt > now
+    ? current.attempts + 1
+    : 1;
   if (attempts >= MAX_LOGIN_ATTEMPTS) {
     loginLockState.set(normalized, now + LOGIN_LOCKOUT_SECONDS * 1000);
     loginAttemptState.delete(normalized);
     return { locked: true, attempts };
   }
-  loginAttemptState.set(normalized, { attempts, expiresAt: now + LOGIN_LOCKOUT_SECONDS * 1000 });
+  loginAttemptState.set(normalized, {
+    attempts,
+    expiresAt: now + LOGIN_LOCKOUT_SECONDS * 1000,
+  });
   return { locked: false, attempts };
 };
 
@@ -673,7 +793,9 @@ const encodeSessionToken = async (session: SessionData) => {
   return `bl1.${payloadEncoded}.${signature}`;
 };
 
-const decodeSessionToken = async (token: string): Promise<SessionData | null> => {
+const decodeSessionToken = async (
+  token: string,
+): Promise<SessionData | null> => {
   const normalizedToken = normalizeText(token);
   if (!normalizedToken) return null;
   const parts = normalizedToken.split(".");
@@ -682,9 +804,14 @@ const decodeSessionToken = async (token: string): Promise<SessionData | null> =>
   const expectedSignature = await signHmac(sessionSigningSecret, parts[1]);
   if (expectedSignature !== parts[2]) return null;
   try {
-    const parsed = JSON.parse(bytesToString(base64UrlDecode(parts[1]))) as SessionData & { exp?: number };
+    const parsed = JSON.parse(bytesToString(base64UrlDecode(parts[1]))) as
+      & SessionData
+      & { exp?: number };
     if (!parsed?.username) return null;
-    if (Number(parsed.exp) > 0 && Number(parsed.exp) < Math.floor(Date.now() / 1000)) return null;
+    if (
+      Number(parsed.exp) > 0 &&
+      Number(parsed.exp) < Math.floor(Date.now() / 1000)
+    ) return null;
     return {
       userId: normalizeText(parsed.userId),
       username: normalizeText(parsed.username),
@@ -692,7 +819,9 @@ const decodeSessionToken = async (token: string): Promise<SessionData | null> =>
       role: normalizeRole(parsed.role),
       issuedAt: normalizeText(parsed.issuedAt) || new Date().toISOString(),
       email: normalizeText(parsed.email),
-      permissions: Array.isArray(parsed.permissions) ? parsed.permissions.map((item) => normalizeText(item)).filter(Boolean) : undefined,
+      permissions: Array.isArray(parsed.permissions)
+        ? parsed.permissions.map((item) => normalizeText(item)).filter(Boolean)
+        : undefined,
       staffPortalUnlocked: !!parsed.staffPortalUnlocked,
       staffPortalUnlockedAt: normalizeText(parsed.staffPortalUnlockedAt),
     };
@@ -737,7 +866,9 @@ const callSupabaseRequest = async (
   extraHeaders: Record<string, string> = {},
 ): Promise<SupabaseRow[]> => {
   const { supabaseUrl, serviceRoleKey } = ensureConfigured();
-  const endpoint = `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/${encodeURIComponent(tableName)}${buildQueryString(query)}`;
+  const endpoint = `${supabaseUrl.replace(/\/+$/, "")}/rest/v1/${
+    encodeURIComponent(tableName)
+  }${buildQueryString(query)}`;
   const response = await fetch(endpoint, {
     method,
     headers: {
@@ -751,7 +882,11 @@ const callSupabaseRequest = async (
   });
   if (!response.ok) {
     const errorText = normalizeText(await response.text());
-    throw new Error(`Supabase REST API error (${response.status}): ${errorText || "unknown error"}`);
+    throw new Error(
+      `Supabase REST API error (${response.status}): ${
+        errorText || "unknown error"
+      }`,
+    );
   }
   if (response.status === 204) return [];
   const data = await response.json();
@@ -763,14 +898,18 @@ const patchSupabaseRows = async (
   query: Record<string, string>,
   payload: JsonObject,
 ) => {
-  await callSupabaseRequest("PATCH", tableName, query, payload, { Prefer: "return=minimal" });
+  await callSupabaseRequest("PATCH", tableName, query, payload, {
+    Prefer: "return=minimal",
+  });
 };
 
 const deleteSupabaseRows = async (
   tableName: string,
   query: Record<string, string>,
 ) => {
-  await callSupabaseRequest("DELETE", tableName, query, undefined, { Prefer: "return=minimal" });
+  await callSupabaseRequest("DELETE", tableName, query, undefined, {
+    Prefer: "return=minimal",
+  });
 };
 
 const insertSupabaseRows = async (
@@ -801,7 +940,9 @@ const getSettingsMapSnapshot = async (): Promise<SettingsMap> => {
   return settingsMap;
 };
 
-const upsertAppSettingValues = async (entries: Record<string, { valueText: string; valueJson?: JsonValue | null }>) => {
+const upsertAppSettingValues = async (
+  entries: Record<string, { valueText: string; valueJson?: JsonValue | null }>,
+) => {
   const existingMap = await getSettingsMapSnapshot();
   const nowIso = new Date().toISOString();
   for (const [key, value] of Object.entries(entries)) {
@@ -826,19 +967,50 @@ const parseBooleanSetting = (value: unknown, fallback: boolean) => {
 
 const buildNotificationSettingsPayload = (settingsMap: SettingsMap) => ({
   recipients: normalizeText(settingsMap.NotificationRecipients),
-  notifyApprovalSubmitted: parseBooleanSetting(settingsMap.NotifyApprovalSubmitted, true),
-  notifyApprovalApproved: parseBooleanSetting(settingsMap.NotifyApprovalApproved, true),
-  notifyApprovalRejected: parseBooleanSetting(settingsMap.NotifyApprovalRejected, true),
-  notifyAttachmentUploaded: parseBooleanSetting(settingsMap.NotifyAttachmentUploaded, false),
-  notifyPaymentCreated: parseBooleanSetting(settingsMap.NotifyPaymentCreated, false),
-  notifyPaymentReversed: parseBooleanSetting(settingsMap.NotifyPaymentReversed, true),
-  notifyReportArchived: parseBooleanSetting(settingsMap.NotifyReportArchived, true),
-  notifyAccountingClosed: parseBooleanSetting(settingsMap.NotifyAccountingClosed, true),
-  notifyBackupCompleted: parseBooleanSetting(settingsMap.NotifyBackupCompleted, true),
+  notifyApprovalSubmitted: parseBooleanSetting(
+    settingsMap.NotifyApprovalSubmitted,
+    true,
+  ),
+  notifyApprovalApproved: parseBooleanSetting(
+    settingsMap.NotifyApprovalApproved,
+    true,
+  ),
+  notifyApprovalRejected: parseBooleanSetting(
+    settingsMap.NotifyApprovalRejected,
+    true,
+  ),
+  notifyAttachmentUploaded: parseBooleanSetting(
+    settingsMap.NotifyAttachmentUploaded,
+    false,
+  ),
+  notifyPaymentCreated: parseBooleanSetting(
+    settingsMap.NotifyPaymentCreated,
+    false,
+  ),
+  notifyPaymentReversed: parseBooleanSetting(
+    settingsMap.NotifyPaymentReversed,
+    true,
+  ),
+  notifyReportArchived: parseBooleanSetting(
+    settingsMap.NotifyReportArchived,
+    true,
+  ),
+  notifyAccountingClosed: parseBooleanSetting(
+    settingsMap.NotifyAccountingClosed,
+    true,
+  ),
+  notifyBackupCompleted: parseBooleanSetting(
+    settingsMap.NotifyBackupCompleted,
+    true,
+  ),
 });
 
-const normalizeSettingsInputObject = (value: unknown): Record<string, unknown> => {
-  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+const normalizeSettingsInputObject = (
+  value: unknown,
+): Record<string, unknown> => {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
   return {};
 };
 
@@ -859,7 +1031,8 @@ const buildCurrentUserSnapshot = async (session: SessionData) => {
   }
 
   const rows = await callSupabase("app_users", {
-    select: "user_id,username,full_name,email,role,status,email_verified_at_text,pin_hash,permissions_json",
+    select:
+      "user_id,username,full_name,email,role,status,email_verified_at_text,pin_hash,permissions_json",
     username: `eq.${username}`,
     limit: "1",
   });
@@ -872,18 +1045,25 @@ const buildCurrentUserSnapshot = async (session: SessionData) => {
       fullName: normalizeText(session.fullName) || username,
       email: normalizeText(session.email),
       role: normalizeRole(session.role),
-      permissions: Array.isArray(session.permissions) && session.permissions.length ? session.permissions : getAllPermissionKeys(),
+      permissions:
+        Array.isArray(session.permissions) && session.permissions.length
+          ? session.permissions
+          : getAllPermissionKeys(),
       staffPortalUnlocked: !!session.staffPortalUnlocked,
       staffPortalUnlockedAt: normalizeText(session.staffPortalUnlockedAt),
       permissionCatalog: getPermissionCatalog(),
     };
   }
 
-  const permissions = getEffectivePermissions(userRow, normalizeRole(userRow.role));
+  const permissions = getEffectivePermissions(
+    userRow,
+    normalizeRole(userRow.role),
+  );
   return {
     userId: normalizeText(userRow.user_id),
     username: normalizeText(userRow.username) || username,
-    fullName: normalizeText(userRow.full_name) || normalizeText(session.fullName) || username,
+    fullName: normalizeText(userRow.full_name) ||
+      normalizeText(session.fullName) || username,
     email: normalizeLower(userRow.email),
     role: normalizeRole(userRow.role),
     status: normalizeUserStatus(userRow.status),
@@ -900,7 +1080,8 @@ const findUserByUsername = async (username: unknown) => {
   const normalizedUsername = normalizeLower(username);
   if (!normalizedUsername) return null;
   const rows = await callSupabase("app_users", {
-    select: "user_id,username,full_name,email,role,status,email_verified_at_text,pin_hash,pin_unique_key,permissions_json,last_login_at_text,updated_at_text",
+    select:
+      "user_id,username,full_name,email,role,status,email_verified_at_text,pin_hash,pin_unique_key,permissions_json,last_login_at_text,updated_at_text",
     username: `eq.${normalizedUsername}`,
     limit: "1",
   });
@@ -914,7 +1095,8 @@ const findUserByLoginPin = async (pinValue: unknown) => {
   const directPinUniqueKey = await computePinUniqueKey(normalizedPin);
   if (directPinUniqueKey) {
     const directRows = await callSupabase("app_users", {
-      select: "user_id,username,full_name,email,role,status,email_verified_at_text,pin_hash,pin_unique_key,permissions_json,last_login_at_text,updated_at_text",
+      select:
+        "user_id,username,full_name,email,role,status,email_verified_at_text,pin_hash,pin_unique_key,permissions_json,last_login_at_text,updated_at_text",
       pin_unique_key: `eq.${directPinUniqueKey}`,
       limit: "2",
     });
@@ -925,15 +1107,21 @@ const findUserByLoginPin = async (pinValue: unknown) => {
   }
 
   const candidateRows = await callSupabase("app_users", {
-    select: "user_id,username,full_name,email,role,status,email_verified_at_text,pin_hash,pin_unique_key,permissions_json,last_login_at_text,updated_at_text",
+    select:
+      "user_id,username,full_name,email,role,status,email_verified_at_text,pin_hash,pin_unique_key,permissions_json,last_login_at_text,updated_at_text",
     not: "pin_hash.is.null",
     limit: "5000",
   });
   let matchedUser: SupabaseRow | null = null;
   for (const user of candidateRows) {
     if (!normalizeText(user.pin_hash)) continue;
-    if (!await verifyPasswordAgainstStoredHash(normalizedPin, user.pin_hash)) continue;
-    if (matchedUser && normalizeText(matchedUser.user_id) !== normalizeText(user.user_id)) {
+    if (!await verifyPasswordAgainstStoredHash(normalizedPin, user.pin_hash)) {
+      continue;
+    }
+    if (
+      matchedUser &&
+      normalizeText(matchedUser.user_id) !== normalizeText(user.user_id)
+    ) {
       throw new Error("PIN นี้ซ้ำกับหลายบัญชี กรุณาติดต่อผู้ดูแลระบบ");
     }
     matchedUser = user;
@@ -947,7 +1135,10 @@ const verifyLoginPin = async (payload: RpcPayload) => {
   let normalizedUsername = "";
   let normalizedPin = "";
 
-  if (pinMaybe !== undefined && pinMaybe !== null && normalizeText(pinMaybe) !== "") {
+  if (
+    pinMaybe !== undefined && pinMaybe !== null &&
+    normalizeText(pinMaybe) !== ""
+  ) {
     normalizedUsername = normalizeLower(pinOrUsername);
     normalizedPin = normalizePinInput(pinMaybe);
   } else {
@@ -968,7 +1159,8 @@ const verifyLoginPin = async (payload: RpcPayload) => {
     return { status: "Error", message: "กรุณากรอก PIN 6 หลัก" } as JsonObject;
   }
 
-  const lockIdentity = normalizedUsername || `pin:${await computePinUniqueKey(normalizedPin)}`;
+  const lockIdentity = normalizedUsername ||
+    `pin:${await computePinUniqueKey(normalizedPin)}`;
   if (getLoginLockoutState(lockIdentity).locked) {
     return {
       status: "Locked",
@@ -978,7 +1170,9 @@ const verifyLoginPin = async (payload: RpcPayload) => {
 
   let userRecord: SupabaseRow | null = null;
   try {
-    userRecord = normalizedUsername ? await findUserByUsername(normalizedUsername) : await findUserByLoginPin(normalizedPin);
+    userRecord = normalizedUsername
+      ? await findUserByUsername(normalizedUsername)
+      : await findUserByLoginPin(normalizedPin);
   } catch (error) {
     return {
       status: "Error",
@@ -996,7 +1190,9 @@ const verifyLoginPin = async (payload: RpcPayload) => {
     } as JsonObject;
   }
 
-  const normalizedStatus = normalizeUserStatus(userRecord.status || USER_STATUS_PENDING);
+  const normalizedStatus = normalizeUserStatus(
+    userRecord.status || USER_STATUS_PENDING,
+  );
   if (normalizedStatus !== USER_STATUS_ACTIVE) {
     return {
       status: "Error",
@@ -1013,9 +1209,14 @@ const verifyLoginPin = async (payload: RpcPayload) => {
     } as JsonObject;
   }
 
-  const pinMatched = await verifyPasswordAgainstStoredHash(normalizedPin, userRecord.pin_hash);
+  const pinMatched = await verifyPasswordAgainstStoredHash(
+    normalizedPin,
+    userRecord.pin_hash,
+  );
   if (!pinMatched) {
-    const failedState = registerFailedLoginAttempt(normalizeText(userRecord.username) || lockIdentity);
+    const failedState = registerFailedLoginAttempt(
+      normalizeText(userRecord.username) || lockIdentity,
+    );
     return {
       status: failedState.locked ? "Locked" : "Error",
       message: failedState.locked
@@ -1024,7 +1225,10 @@ const verifyLoginPin = async (payload: RpcPayload) => {
     } as JsonObject;
   }
 
-  const permissions = getEffectivePermissions(userRecord, normalizeRole(userRecord.role));
+  const permissions = getEffectivePermissions(
+    userRecord,
+    normalizeRole(userRecord.role),
+  );
   const loginAt = formatThaiDateTime(new Date());
   if (normalizeText(userRecord.user_id)) {
     try {
@@ -1047,7 +1251,8 @@ const verifyLoginPin = async (payload: RpcPayload) => {
   const authenticatedSession: SessionData = {
     userId: normalizeText(userRecord.user_id),
     username: normalizeText(userRecord.username),
-    fullName: normalizeText(userRecord.full_name) || normalizeText(userRecord.username),
+    fullName: normalizeText(userRecord.full_name) ||
+      normalizeText(userRecord.username),
     role: normalizeRole(userRecord.role),
     issuedAt: new Date().toISOString(),
     email: normalizeLower(userRecord.email),
@@ -1073,7 +1278,9 @@ const verifyLoginPin = async (payload: RpcPayload) => {
 
 const resolveSession = async (payload: RpcPayload) => {
   const env = ensureConfigured();
-  const tokenSession = await decodeSessionToken(normalizeText(payload.sessionToken));
+  const tokenSession = await decodeSessionToken(
+    normalizeText(payload.sessionToken),
+  );
   if (tokenSession) {
     const currentUser = await buildCurrentUserSnapshot(tokenSession);
     if (env.loginRequired) {
@@ -1093,11 +1300,17 @@ const resolveSession = async (payload: RpcPayload) => {
       session: {
         userId: normalizeText(currentUser.userId || tokenSession.userId),
         username: normalizeText(currentUser.username || tokenSession.username),
-        fullName: normalizeText(currentUser.fullName || tokenSession.fullName || tokenSession.username),
+        fullName: normalizeText(
+          currentUser.fullName || tokenSession.fullName ||
+            tokenSession.username,
+        ),
         role: normalizeRole(currentUser.role || tokenSession.role),
-        issuedAt: normalizeText(tokenSession.issuedAt) || new Date().toISOString(),
+        issuedAt: normalizeText(tokenSession.issuedAt) ||
+          new Date().toISOString(),
         email: normalizeText(currentUser.email || tokenSession.email),
-        permissions: Array.isArray(currentUser.permissions) ? currentUser.permissions : tokenSession.permissions,
+        permissions: Array.isArray(currentUser.permissions)
+          ? currentUser.permissions
+          : tokenSession.permissions,
         staffPortalUnlocked: !!currentUser.staffPortalUnlocked,
         staffPortalUnlockedAt: normalizeText(currentUser.staffPortalUnlockedAt),
       },
@@ -1126,7 +1339,10 @@ const resolveSession = async (payload: RpcPayload) => {
   throw new Error("UNAUTHORIZED: กรุณาเข้าสู่ระบบใหม่อีกครั้ง");
 };
 
-const buildRuntimeLoanDataFromSupabaseRow = (row: SupabaseRow, currentMonthContext: { month: number; yearBe: number; monthKey: string }) => {
+const buildRuntimeLoanDataFromSupabaseRow = (
+  row: SupabaseRow,
+  currentMonthContext: { month: number; yearBe: number; monthKey: string },
+) => {
   const balance = Number(row.outstanding_balance) || 0;
   const overdueMonths = Math.max(0, Number(row.overdue_months) || 0);
   return {
@@ -1156,7 +1372,9 @@ const buildRuntimeTransactionDataFromSupabaseRow = (row: SupabaseRow) => {
   const timestamp = normalizeText(row.occurred_on_text);
   const parts = parseThaiDateParts(timestamp);
   const sortKey = parts
-    ? `${parts.yearBe}${pad2(parts.month)}${pad2(parts.day)}${pad2(parts.hour)}${pad2(parts.minute)}${pad2(parts.second)}`
+    ? `${parts.yearBe}${pad2(parts.month)}${pad2(parts.day)}${
+      pad2(parts.hour)
+    }${pad2(parts.minute)}${pad2(parts.second)}`
     : timestamp;
   return {
     id: normalizeText(row.reference_id),
@@ -1185,7 +1403,10 @@ const buildCurrentMonthInterestPaidMapFromSupabaseRows = (
     if (isInactiveTransactionStatus(row.tx_status)) continue;
     const parts = parseThaiDateParts(row.occurred_on_text);
     if (!parts) continue;
-    if (Number(parts.yearBe) !== Number(currentMonthContext.yearBe) || Number(parts.month) !== Number(currentMonthContext.month)) {
+    if (
+      Number(parts.yearBe) !== Number(currentMonthContext.yearBe) ||
+      Number(parts.month) !== Number(currentMonthContext.month)
+    ) {
       continue;
     }
     const contractNo = normalizeText(row.contract_no);
@@ -1201,19 +1422,23 @@ const buildPaymentLoanFromSupabaseLoanRow = (
   lastClosedAccountingMonth: unknown,
 ) => {
   const balance = Number(row.outstanding_balance) || 0;
-  const interestRate = Number.isFinite(Number(row.interest_rate)) && Number(row.interest_rate) >= 0
-    ? Number(row.interest_rate)
-    : DEFAULT_INTEREST_RATE;
+  const interestRate =
+    Number.isFinite(Number(row.interest_rate)) && Number(row.interest_rate) >= 0
+      ? Number(row.interest_rate)
+      : DEFAULT_INTEREST_RATE;
   const contractNo = normalizeText(row.contract_no);
   const missedInterestMonths = Math.max(0, Number(row.overdue_months) || 0);
   const currentMonthInterestPaid = !!currentMonthInterestPaidMap[contractNo];
-  const includeCurrentMonthInstallment = shouldCountSelectedMonthAsDueForOverdueReport(
-    currentMonthContext.yearBe,
-    currentMonthContext.month,
-    lastClosedAccountingMonth,
-  );
-  const currentMonthRequiredInstallment = includeCurrentMonthInstallment && !currentMonthInterestPaid ? 1 : 0;
-  const reportMissedInterestMonths = missedInterestMonths + currentMonthRequiredInstallment;
+  const includeCurrentMonthInstallment =
+    shouldCountSelectedMonthAsDueForOverdueReport(
+      currentMonthContext.yearBe,
+      currentMonthContext.month,
+      lastClosedAccountingMonth,
+    );
+  const currentMonthRequiredInstallment =
+    includeCurrentMonthInstallment && !currentMonthInterestPaid ? 1 : 0;
+  const reportMissedInterestMonths = missedInterestMonths +
+    currentMonthRequiredInstallment;
   return {
     memberId: normalizeText(row.member_id),
     contract: contractNo,
@@ -1221,32 +1446,44 @@ const buildPaymentLoanFromSupabaseLoanRow = (
     amount: Number(row.principal_amount) || 0,
     interest: interestRate,
     balance,
-    status: deriveLoanStatusFromState(balance, missedInterestMonths, row.status),
+    status: deriveLoanStatusFromState(
+      balance,
+      missedInterestMonths,
+      row.status,
+    ),
     nextPayment: normalizeText(row.due_date_text),
     missedInterestMonths,
     currentMonthInterestPaid,
     reportMissedInterestMonths,
     currentMonthRequiredInstallment,
     maxInterestInstallments: Math.max(1, reportMissedInterestMonths),
-    monthlyInterestDue: Math.max(0, Math.floor(Math.max(0, balance) * (interestRate / 100) / 12)),
+    monthlyInterestDue: Math.max(
+      0,
+      Math.floor(Math.max(0, balance) * (interestRate / 100) / 12),
+    ),
     createdAt: normalizeLoanCreatedAt(row.created_date_text),
     guarantor1: normalizeText(row.guarantor_1),
     guarantor2: normalizeText(row.guarantor_2),
   };
 };
 
-const buildAppRuntimePayload = async (session: SessionData, includeMembers: boolean) => {
+const buildAppRuntimePayload = async (
+  session: SessionData,
+  includeMembers: boolean,
+) => {
   const settingsMap = await getSettingsMapSnapshot();
   const currentMonthContext = getCurrentThaiMonthContext();
 
   const [loanRows, transactionRows, memberRows] = await Promise.all([
     callSupabase("loans", {
-      select: "contract_no,member_id,borrower_name,principal_amount,interest_rate,outstanding_balance,status,due_date_text,overdue_months,created_date_text,guarantor_1,guarantor_2",
+      select:
+        "contract_no,member_id,borrower_name,principal_amount,interest_rate,outstanding_balance,status,due_date_text,overdue_months,created_date_text,guarantor_1,guarantor_2",
       order: "contract_no.asc",
       limit: "5000",
     }),
     callSupabase("transactions", {
-      select: "reference_id,occurred_on_text,contract_no,member_id,principal_paid,interest_paid,outstanding_balance,note,actor,full_name,tx_status,interest_months_paid,overdue_interest_before,overdue_interest_after",
+      select:
+        "reference_id,occurred_on_text,contract_no,member_id,principal_paid,interest_paid,outstanding_balance,note,actor,full_name,tx_status,interest_months_paid,overdue_interest_before,overdue_interest_after",
       order: "updated_at.desc",
       limit: "200",
     }),
@@ -1259,15 +1496,21 @@ const buildAppRuntimePayload = async (session: SessionData, includeMembers: bool
       : Promise.resolve([]),
   ]);
 
-  const loans = loanRows.map((row) => buildRuntimeLoanDataFromSupabaseRow(row, currentMonthContext));
+  const loans = loanRows.map((row) =>
+    buildRuntimeLoanDataFromSupabaseRow(row, currentMonthContext)
+  );
   const transactions = transactionRows
     .map(buildRuntimeTransactionDataFromSupabaseRow)
     .filter((row) => !isInactiveTransactionStatus(row.txStatus))
-    .sort((a, b) => String(b._sortKey || "").localeCompare(String(a._sortKey || "")))
+    .sort((a, b) =>
+      String(b._sortKey || "").localeCompare(String(a._sortKey || ""))
+    )
     .slice(0, 100)
     .map(({ _sortKey, ...row }) => row);
 
-  const currentUser = includeMembers ? await buildCurrentUserSnapshot(session) : null;
+  const currentUser = includeMembers
+    ? await buildCurrentUserSnapshot(session)
+    : null;
   const members = includeMembers
     ? memberRows.map((row) => ({
       id: normalizeText(row.member_id),
@@ -1281,16 +1524,30 @@ const buildAppRuntimePayload = async (session: SessionData, includeMembers: bool
     transactions,
     monthlyDashboardCoverCards: [],
     dashboardSummaryYearBe: currentMonthContext.yearBe,
-    dashboardOverviewStats: buildDashboardOverviewStatsFromLoans(loans, includeMembers ? members.length : 0),
+    dashboardOverviewStats: buildDashboardOverviewStatsFromLoans(
+      loans,
+      includeMembers ? members.length : 0,
+    ),
     settings: {
       interestRate: Number(settingsMap.InterestRate) || DEFAULT_INTEREST_RATE,
       dailyInterestAutomationEnabled: false,
       dailyInterestAutomationSchedule: "คำนวณค้างดอกเมื่อกดปิดยอดสิ้นวัน",
-      lastClosedAccountingMonth: normalizeText(settingsMap.LastClosedAccountingMonth),
+      lastClosedAccountingMonth: normalizeText(
+        settingsMap.LastClosedAccountingMonth,
+      ),
       lastClosedAccountingAt: normalizeText(settingsMap.LastClosedAccountingAt),
-      operatingDayCalendar: normalizeJsonSetting<Record<string, string>>(settingsMap[OPERATING_DAY_CALENDAR_SETTING_KEY], {}),
-      reportLayoutSettings: normalizeJsonSetting<Record<string, JsonValue>>(settingsMap[REPORT_LAYOUT_SETTINGS_KEY], {}),
-      menuSettings: normalizeJsonSetting<Record<string, JsonValue>>(settingsMap[MENU_SETTINGS_KEY], {}),
+      operatingDayCalendar: normalizeJsonSetting<Record<string, string>>(
+        settingsMap[OPERATING_DAY_CALENDAR_SETTING_KEY],
+        {},
+      ),
+      reportLayoutSettings: normalizeJsonSetting<Record<string, JsonValue>>(
+        settingsMap[REPORT_LAYOUT_SETTINGS_KEY],
+        {},
+      ),
+      menuSettings: normalizeJsonSetting<Record<string, JsonValue>>(
+        settingsMap[MENU_SETTINGS_KEY],
+        {},
+      ),
     },
   };
 
@@ -1299,10 +1556,14 @@ const buildAppRuntimePayload = async (session: SessionData, includeMembers: bool
     payload.currentUser = {
       userId: normalizeText(currentUser?.userId || session.userId),
       username: normalizeText(currentUser?.username || session.username),
-      fullName: normalizeText(currentUser?.fullName || session.fullName || session.username),
+      fullName: normalizeText(
+        currentUser?.fullName || session.fullName || session.username,
+      ),
       email: normalizeLower(currentUser?.email),
       role: normalizeRole(currentUser?.role || session.role),
-      permissions: Array.isArray(currentUser?.permissions) ? currentUser.permissions : getAllPermissionKeys(),
+      permissions: Array.isArray(currentUser?.permissions)
+        ? currentUser.permissions
+        : getAllPermissionKeys(),
       staffPortalUnlocked: !!currentUser?.staffPortalUnlocked,
       staffPortalUnlockedAt: normalizeText(currentUser?.staffPortalUnlockedAt),
       permissionCatalog: getPermissionCatalog(),
@@ -1317,7 +1578,8 @@ const buildPaymentReadyData = async () => {
   const currentMonthContext = getCurrentThaiMonthContext();
   const [loanRows, transactionRows] = await Promise.all([
     callSupabase("loans", {
-      select: "contract_no,member_id,borrower_name,principal_amount,interest_rate,outstanding_balance,status,due_date_text,overdue_months,created_date_text,guarantor_1,guarantor_2",
+      select:
+        "contract_no,member_id,borrower_name,principal_amount,interest_rate,outstanding_balance,status,due_date_text,overdue_months,created_date_text,guarantor_1,guarantor_2",
       order: "member_id.asc,contract_no.asc",
       limit: "5000",
     }),
@@ -1327,7 +1589,11 @@ const buildPaymentReadyData = async () => {
       limit: "5000",
     }),
   ]);
-  const currentMonthInterestPaidMap = buildCurrentMonthInterestPaidMapFromSupabaseRows(transactionRows, currentMonthContext);
+  const currentMonthInterestPaidMap =
+    buildCurrentMonthInterestPaidMapFromSupabaseRows(
+      transactionRows,
+      currentMonthContext,
+    );
   return {
     loans: loanRows.map((row) =>
       buildPaymentLoanFromSupabaseLoanRow(
@@ -1357,13 +1623,22 @@ const buildPaymentTodayTransactionFromSupabaseRow = (row: SupabaseRow) => ({
   interestMonthsPaid: Math.max(0, Number(row.interest_months_paid) || 0),
 });
 
-const getCurrentActorName = (session: SessionData) => normalizeText(session.fullName) || normalizeText(session.username) || "System Admin";
+const getCurrentActorName = (session: SessionData) =>
+  normalizeText(session.fullName) || normalizeText(session.username) ||
+  "System Admin";
 
-const sanitizeReverseReason = (reason: unknown) => normalizeText(reason).replace(/\s+/g, " ").trim().slice(0, 180);
+const sanitizeReverseReason = (reason: unknown) =>
+  normalizeText(reason).replace(/\s+/g, " ").trim().slice(0, 180);
 
-const buildReverseTransactionNote = (sourceTxId: unknown, reason: unknown, reversalTxId: unknown) => {
+const buildReverseTransactionNote = (
+  sourceTxId: unknown,
+  reason: unknown,
+  reversalTxId: unknown,
+) => {
   const parts = [`กลับรายการอ้างอิง ${normalizeText(sourceTxId) || "-"}`];
-  if (normalizeText(reversalTxId)) parts.push(`เลขที่กลับรายการ ${normalizeText(reversalTxId)}`);
+  if (normalizeText(reversalTxId)) {
+    parts.push(`เลขที่กลับรายการ ${normalizeText(reversalTxId)}`);
+  }
   if (normalizeText(reason)) parts.push(`เหตุผล: ${normalizeText(reason)}`);
   return parts.join(" | ").slice(0, 500);
 };
@@ -1378,7 +1653,8 @@ const getLoanByContractNo = async (contractNo: unknown) => {
   const normalizedContractNo = normalizeText(contractNo);
   if (!normalizedContractNo) return null;
   const rows = await callSupabase("loans", {
-    select: "contract_no,member_id,borrower_name,principal_amount,interest_rate,outstanding_balance,status,due_date_text,overdue_months,created_date_text,guarantor_1,guarantor_2",
+    select:
+      "contract_no,member_id,borrower_name,principal_amount,interest_rate,outstanding_balance,status,due_date_text,overdue_months,created_date_text,guarantor_1,guarantor_2",
     contract_no: `eq.${normalizedContractNo}`,
     limit: "1",
   });
@@ -1395,13 +1671,16 @@ const getAllMembers = async () => {
 
 const getAllLoansForMemberSync = async () => {
   return callSupabase("loans", {
-    select: "contract_no,member_id,borrower_name,guarantor_1,guarantor_2,status,outstanding_balance,overdue_months",
+    select:
+      "contract_no,member_id,borrower_name,guarantor_1,guarantor_2,status,outstanding_balance,overdue_months",
     order: "contract_no.asc",
     limit: "5000",
   });
 };
 
-const upsertMemberRow = async (member: { id: string; name: string; status: string }) => {
+const upsertMemberRow = async (
+  member: { id: string; name: string; status: string },
+) => {
   const nowIso = new Date().toISOString();
   await insertSupabaseRows("members", {
     member_id: member.id,
@@ -1417,21 +1696,32 @@ const upsertMemberRow = async (member: { id: string; name: string; status: strin
   });
 };
 
-const pickSingleMemberCandidate = (candidates: Array<{ id: string; name: string; status: string }>) => {
+const pickSingleMemberCandidate = (
+  candidates: Array<{ id: string; name: string; status: string }>,
+) => {
   if (!candidates.length) return null;
   if (candidates.length === 1) return candidates[0];
 
-  const realMembers = candidates.filter((entry) => !isTemporaryGuarantorStatus(entry.status));
-  const tempMembers = candidates.filter((entry) => isTemporaryGuarantorStatus(entry.status));
+  const realMembers = candidates.filter((entry) =>
+    !isTemporaryGuarantorStatus(entry.status)
+  );
+  const tempMembers = candidates.filter((entry) =>
+    isTemporaryGuarantorStatus(entry.status)
+  );
   if (realMembers.length === 1) return realMembers[0];
-  if (realMembers.length === 0 && tempMembers.length === 1) return tempMembers[0];
+  if (realMembers.length === 0 && tempMembers.length === 1) {
+    return tempMembers[0];
+  }
   return null;
 };
 
 const buildMemberRegistryIndex = (members: SupabaseRow[]) => {
   const result: {
     byId: Record<string, { id: string; name: string; status: string }>;
-    byNameKey: Record<string, Array<{ id: string; name: string; status: string }>>;
+    byNameKey: Record<
+      string,
+      Array<{ id: string; name: string; status: string }>
+    >;
   } = { byId: {}, byNameKey: {} };
 
   for (const member of members) {
@@ -1461,7 +1751,9 @@ const findBestMemberMatchForGuarantor = (
 
   const parsed = parseGuarantorInputParts(rawText);
   const explicitId = normalizeTextForMatch(parsed.memberId);
-  if (explicitId && memberIndex.byId[explicitId]) return memberIndex.byId[explicitId];
+  if (explicitId && memberIndex.byId[explicitId]) {
+    return memberIndex.byId[explicitId];
+  }
   if (memberIndex.byId[rawText]) return memberIndex.byId[rawText];
 
   const nameKey = normalizeMemberNameKey(parsed.memberName || rawText);
@@ -1491,13 +1783,21 @@ const createTemporaryGuarantorMember = async (
   const cleanName = normalizeTextForMatch(guarantorName);
   if (!cleanName) return null;
   const tempId = generateNextTemporaryMemberId(members);
-  await upsertMemberRow({ id: tempId, name: cleanName, status: TEMP_GUARANTOR_STATUS });
+  await upsertMemberRow({
+    id: tempId,
+    name: cleanName,
+    status: TEMP_GUARANTOR_STATUS,
+  });
   const entry = { id: tempId, name: cleanName, status: TEMP_GUARANTOR_STATUS };
   memberIndex.byId[tempId] = entry;
   const nameKey = normalizeMemberNameKey(cleanName);
   if (!memberIndex.byNameKey[nameKey]) memberIndex.byNameKey[nameKey] = [];
   memberIndex.byNameKey[nameKey].push(entry);
-  members.push({ member_id: tempId, full_name: cleanName, status: TEMP_GUARANTOR_STATUS });
+  members.push({
+    member_id: tempId,
+    full_name: cleanName,
+    status: TEMP_GUARANTOR_STATUS,
+  });
   return entry;
 };
 
@@ -1532,8 +1832,13 @@ const ensureGuarantorMemberRecord = async (
 
   const parsed = parseGuarantorInputParts(rawText);
   const nameKey = normalizeMemberNameKey(parsed.memberName || rawText);
-  const sameNameCandidates = nameKey ? (memberIndex.byNameKey[nameKey] || []) : [];
-  if (sameNameCandidates.length > 1 && !pickSingleMemberCandidate(sameNameCandidates)) {
+  const sameNameCandidates = nameKey
+    ? (memberIndex.byNameKey[nameKey] || [])
+    : [];
+  if (
+    sameNameCandidates.length > 1 &&
+    !pickSingleMemberCandidate(sameNameCandidates)
+  ) {
     return {
       memberId: "",
       memberName: normalizeTextForMatch(parsed.memberName || rawText),
@@ -1546,7 +1851,11 @@ const ensureGuarantorMemberRecord = async (
 
   let tempEntry = pickSingleMemberCandidate(sameNameCandidates);
   if (!tempEntry) {
-    tempEntry = await createTemporaryGuarantorMember(members, memberIndex, parsed.memberName || rawText);
+    tempEntry = await createTemporaryGuarantorMember(
+      members,
+      memberIndex,
+      parsed.memberName || rawText,
+    );
   }
   if (!tempEntry) {
     return {
@@ -1569,21 +1878,36 @@ const ensureGuarantorMemberRecord = async (
   };
 };
 
-const normalizeLoanGuarantorsForSave = async (guarantor1Value: unknown, guarantor2Value: unknown) => {
+const normalizeLoanGuarantorsForSave = async (
+  guarantor1Value: unknown,
+  guarantor2Value: unknown,
+) => {
   const members = await getAllMembers();
   const memberIndex = buildMemberRegistryIndex(members);
-  const result1 = await ensureGuarantorMemberRecord(members, memberIndex, guarantor1Value);
-  const result2 = await ensureGuarantorMemberRecord(members, memberIndex, guarantor2Value);
+  const result1 = await ensureGuarantorMemberRecord(
+    members,
+    memberIndex,
+    guarantor1Value,
+  );
+  const result2 = await ensureGuarantorMemberRecord(
+    members,
+    memberIndex,
+    guarantor2Value,
+  );
 
   return {
     guarantor1: result1.formatted || result1.rawText || "",
     guarantor2: result2.formatted || result2.rawText || "",
-    createdTemporaryCount: (result1.createdTemporary ? 1 : 0) + (result2.createdTemporary ? 1 : 0),
+    createdTemporaryCount: (result1.createdTemporary ? 1 : 0) +
+      (result2.createdTemporary ? 1 : 0),
     ambiguousCount: (result1.ambiguous ? 1 : 0) + (result2.ambiguous ? 1 : 0),
   };
 };
 
-const syncMemberRegisterFromLoanEdit = async (memberId: string, updatedMemberName: string) => {
+const syncMemberRegisterFromLoanEdit = async (
+  memberId: string,
+  updatedMemberName: string,
+) => {
   const normalizedMemberId = normalizeText(memberId);
   const normalizedMemberName = normalizeText(updatedMemberName);
   if (!normalizedMemberId || !normalizedMemberName) return;
@@ -1605,7 +1929,11 @@ const syncMemberRegisterFromLoanEdit = async (memberId: string, updatedMemberNam
       status: normalizeText(memberRow.status),
     },
   });
-  await syncGuarantorReferencesForMember(normalizedMemberId, normalizeText(memberRow.full_name), normalizedMemberName);
+  await syncGuarantorReferencesForMember(
+    normalizedMemberId,
+    normalizeText(memberRow.full_name),
+    normalizedMemberName,
+  );
 };
 
 const insertLoanRow = async (loan: Record<string, unknown>) => {
@@ -1620,7 +1948,8 @@ const insertLoanRow = async (loan: Record<string, unknown>) => {
     status: normalizeText(loan.status),
     due_date_text: normalizeText(loan.nextPayment) || "-",
     overdue_months: Math.max(0, Number(loan.missedInterestMonths) || 0),
-    created_date_text: normalizeLoanCreatedAt(loan.createdAt) || formatThaiDate(new Date()),
+    created_date_text: normalizeLoanCreatedAt(loan.createdAt) ||
+      formatThaiDate(new Date()),
     guarantor_1: normalizeText(loan.guarantor1),
     guarantor_2: normalizeText(loan.guarantor2),
     raw_json: loan as JsonObject,
@@ -1633,13 +1962,18 @@ const patchMemberRow = async (memberId: string, patch: JsonObject) => {
   await patchSupabaseRows("members", { member_id: `eq.${memberId}` }, patch);
 };
 
-const syncLoanBorrowerNameForMember = async (memberId: string, updatedMemberName: string) => {
+const syncLoanBorrowerNameForMember = async (
+  memberId: string,
+  updatedMemberName: string,
+) => {
   const loans = await getAllLoansForMemberSync();
   const changedContracts: string[] = [];
   for (const loan of loans) {
     if (normalizeText(loan.member_id) !== memberId) continue;
     if (normalizeText(loan.borrower_name) === updatedMemberName) continue;
-    await patchSupabaseRows("loans", { contract_no: `eq.${normalizeText(loan.contract_no)}` }, {
+    await patchSupabaseRows("loans", {
+      contract_no: `eq.${normalizeText(loan.contract_no)}`,
+    }, {
       borrower_name: updatedMemberName,
     });
     changedContracts.push(normalizeText(loan.contract_no));
@@ -1647,9 +1981,16 @@ const syncLoanBorrowerNameForMember = async (memberId: string, updatedMemberName
   return changedContracts;
 };
 
-const syncGuarantorReferencesForMember = async (memberId: string, previousMemberName: string, updatedMemberName: string) => {
+const syncGuarantorReferencesForMember = async (
+  memberId: string,
+  previousMemberName: string,
+  updatedMemberName: string,
+) => {
   const loans = await getAllLoansForMemberSync();
-  const formattedGuarantorText = formatMemberDisplayName(memberId, updatedMemberName);
+  const formattedGuarantorText = formatMemberDisplayName(
+    memberId,
+    updatedMemberName,
+  );
   let updatedCount = 0;
   for (const loan of loans) {
     const nextPatch: JsonObject = {};
@@ -1657,7 +1998,11 @@ const syncGuarantorReferencesForMember = async (memberId: string, previousMember
     const currentG1 = normalizeTextForMatch(loan.guarantor_1);
     const currentG2 = normalizeTextForMatch(loan.guarantor_2);
     if (
-      guarantorReferenceMatchesMember(currentG1, memberId, previousMemberName) ||
+      guarantorReferenceMatchesMember(
+        currentG1,
+        memberId,
+        previousMemberName,
+      ) ||
       guarantorReferenceMatchesMember(currentG1, memberId, updatedMemberName)
     ) {
       if (currentG1 !== formattedGuarantorText) {
@@ -1666,7 +2011,11 @@ const syncGuarantorReferencesForMember = async (memberId: string, previousMember
       }
     }
     if (
-      guarantorReferenceMatchesMember(currentG2, memberId, previousMemberName) ||
+      guarantorReferenceMatchesMember(
+        currentG2,
+        memberId,
+        previousMemberName,
+      ) ||
       guarantorReferenceMatchesMember(currentG2, memberId, updatedMemberName)
     ) {
       if (currentG2 !== formattedGuarantorText) {
@@ -1675,17 +2024,24 @@ const syncGuarantorReferencesForMember = async (memberId: string, previousMember
       }
     }
     if (!rowChanged) continue;
-    await patchSupabaseRows("loans", { contract_no: `eq.${normalizeText(loan.contract_no)}` }, nextPatch);
+    await patchSupabaseRows("loans", {
+      contract_no: `eq.${normalizeText(loan.contract_no)}`,
+    }, nextPatch);
     updatedCount += 1;
   }
   return updatedCount;
 };
 
-const upgradeTemporaryMemberToReal = async (memberId: string, memberName: string, finalStatus: string) => {
+const upgradeTemporaryMemberToReal = async (
+  memberId: string,
+  memberName: string,
+  finalStatus: string,
+) => {
   const members = await getAllMembers();
   const nameKey = normalizeTextForMatch(memberName).toLowerCase();
   const tempCandidates = members.filter((member) =>
-    normalizeTextForMatch(member.full_name).toLowerCase() === nameKey && isTemporaryGuarantorStatus(member.status)
+    normalizeTextForMatch(member.full_name).toLowerCase() === nameKey &&
+    isTemporaryGuarantorStatus(member.status)
   );
   if (tempCandidates.length !== 1) return null;
 
@@ -1701,7 +2057,11 @@ const upgradeTemporaryMemberToReal = async (memberId: string, memberName: string
       previousTempId: normalizeText(tempEntry.member_id),
     },
   });
-  await syncGuarantorReferencesForMember(memberId, normalizeText(tempEntry.full_name), memberName);
+  await syncGuarantorReferencesForMember(
+    memberId,
+    normalizeText(tempEntry.full_name),
+    memberName,
+  );
   return {
     previousTempId: normalizeText(tempEntry.member_id),
     updatedMemberId: memberId,
@@ -1713,7 +2073,8 @@ const getTransactionById = async (transactionId: unknown) => {
   const normalizedTxId = normalizeText(transactionId);
   if (!normalizedTxId) return null;
   const rows = await callSupabase("transactions", {
-    select: "reference_id,occurred_on_text,contract_no,member_id,principal_paid,interest_paid,outstanding_balance,note,actor,full_name,tx_status,interest_months_paid,overdue_interest_before,overdue_interest_after",
+    select:
+      "reference_id,occurred_on_text,contract_no,member_id,principal_paid,interest_paid,outstanding_balance,note,actor,full_name,tx_status,interest_months_paid,overdue_interest_before,overdue_interest_after",
     reference_id: `eq.${normalizedTxId}`,
     limit: "1",
   });
@@ -1735,17 +2096,25 @@ const findLatestActiveTransactionForContract = async (contractNo: unknown) => {
   const normalizedContractNo = normalizeText(contractNo);
   if (!normalizedContractNo) return null;
   const rows = await callSupabase("transactions", {
-    select: "reference_id,occurred_on_text,contract_no,member_id,principal_paid,interest_paid,outstanding_balance,note,actor,full_name,tx_status,interest_months_paid,overdue_interest_before,overdue_interest_after",
+    select:
+      "reference_id,occurred_on_text,contract_no,member_id,principal_paid,interest_paid,outstanding_balance,note,actor,full_name,tx_status,interest_months_paid,overdue_interest_before,overdue_interest_after",
     contract_no: `eq.${normalizedContractNo}`,
     order: "updated_at.desc",
     limit: "200",
   });
   return rows
     .filter((row) => !isInactiveTransactionStatus(row.tx_status))
-    .sort((a, b) => normalizeText(b.occurred_on_text).localeCompare(normalizeText(a.occurred_on_text)))[0] || null;
+    .sort((a, b) =>
+      normalizeText(b.occurred_on_text).localeCompare(
+        normalizeText(a.occurred_on_text),
+      )
+    )[0] || null;
 };
 
-const hasActivePaymentForContractOnThaiDate = async (contractNo: unknown, thaiDate: string) => {
+const hasActivePaymentForContractOnThaiDate = async (
+  contractNo: unknown,
+  thaiDate: string,
+) => {
   const normalizedContractNo = normalizeText(contractNo);
   if (!normalizedContractNo) return false;
   const rows = await callSupabase("transactions", {
@@ -1761,14 +2130,35 @@ const hasActivePaymentForContractOnThaiDate = async (contractNo: unknown, thaiDa
   });
 };
 
-const areDuplicatePaymentPayloadsConsistent = (existingTx: SupabaseRow, paymentData: Record<string, unknown>) => {
-  return normalizeText(existingTx.contract_no) === normalizeText(paymentData.contract) &&
-    Math.abs((Number(existingTx.principal_paid) || 0) - (Number(paymentData.principalPaid) || 0)) < 0.0001 &&
-    Math.abs((Number(existingTx.interest_paid) || 0) - (Number(paymentData.interestPaid) || 0)) < 0.0001 &&
-    Math.abs((Number(existingTx.outstanding_balance) || 0) - (Number(paymentData.newBalance) || 0)) < 0.0001;
+const areDuplicatePaymentPayloadsConsistent = (
+  existingTx: SupabaseRow,
+  paymentData: Record<string, unknown>,
+) => {
+  return normalizeText(existingTx.contract_no) ===
+      normalizeText(paymentData.contract) &&
+    Math.abs(
+        (Number(existingTx.principal_paid) || 0) -
+          (Number(paymentData.principalPaid) || 0),
+      ) < 0.0001 &&
+    Math.abs(
+        (Number(existingTx.interest_paid) || 0) -
+          (Number(paymentData.interestPaid) || 0),
+      ) < 0.0001 &&
+    Math.abs(
+        (Number(existingTx.outstanding_balance) || 0) -
+          (Number(paymentData.newBalance) || 0),
+      ) < 0.0001;
 };
 
-const buildSavePaymentResponse = (txId: string, timestamp: string, paymentData: Record<string, unknown>, memberId: string, memberName: string, serverStatus: string, serverNote: string) => ({
+const buildSavePaymentResponse = (
+  txId: string,
+  timestamp: string,
+  paymentData: Record<string, unknown>,
+  memberId: string,
+  memberName: string,
+  serverStatus: string,
+  serverNote: string,
+) => ({
   transactionId: txId,
   timestamp,
   transaction: {
@@ -1799,13 +2189,16 @@ const savePayment = async (payload: RpcPayload) => {
   const existingTx = await getTransactionById(txId);
   if (existingTx) {
     if (!areDuplicatePaymentPayloadsConsistent(existingTx, paymentData)) {
-      throw new Error("พบรหัสรายการซ้ำ แต่ข้อมูลรายการไม่ตรงกับที่มีอยู่เดิม ระบบยกเลิกการบันทึกเพื่อป้องกันข้อมูลเสียหาย");
+      throw new Error(
+        "พบรหัสรายการซ้ำ แต่ข้อมูลรายการไม่ตรงกับที่มีอยู่เดิม ระบบยกเลิกการบันทึกเพื่อป้องกันข้อมูลเสียหาย",
+      );
     }
     return {
       duplicated: true,
       ...buildSavePaymentResponse(
         txId,
-        normalizeText(existingTx.occurred_on_text) || formatThaiDateTime(new Date()),
+        normalizeText(existingTx.occurred_on_text) ||
+          formatThaiDateTime(new Date()),
         {
           ...paymentData,
           contract: existingTx.contract_no,
@@ -1833,48 +2226,92 @@ const savePayment = async (payload: RpcPayload) => {
   const interestPaid = Number(paymentData.interestPaid);
   let newBalance = Number(paymentData.newBalance);
 
-  if (![principalPaid, interestPaid, newBalance].every((value) => Number.isFinite(value))) {
+  if (
+    ![principalPaid, interestPaid, newBalance].every((value) =>
+      Number.isFinite(value)
+    )
+  ) {
     throw new Error("ยอดรับชำระต้องเป็นตัวเลขที่ถูกต้อง");
   }
-  if (principalPaid < 0 || interestPaid < 0) throw new Error("ยอดรับชำระติดลบไม่ได้");
-  if (principalPaid + interestPaid <= 0) throw new Error("กรุณาระบุยอดรับชำระอย่างน้อย 1 รายการ");
+  if (principalPaid < 0 || interestPaid < 0) {
+    throw new Error("ยอดรับชำระติดลบไม่ได้");
+  }
+  if (principalPaid + interestPaid <= 0) {
+    throw new Error("กรุณาระบุยอดรับชำระอย่างน้อย 1 รายการ");
+  }
 
   const currentBalance = Number(loanRow.outstanding_balance) || 0;
   let annualInterestRate = Number(loanRow.interest_rate);
-  if (!Number.isFinite(annualInterestRate) || annualInterestRate < 0) annualInterestRate = DEFAULT_INTEREST_RATE;
-  if (principalPaid > currentBalance) throw new Error("ยอดชำระเงินต้นเกินยอดคงค้าง");
+  if (!Number.isFinite(annualInterestRate) || annualInterestRate < 0) {
+    annualInterestRate = DEFAULT_INTEREST_RATE;
+  }
+  if (principalPaid > currentBalance) {
+    throw new Error("ยอดชำระเงินต้นเกินยอดคงค้าง");
+  }
 
   const isOffsetPayment = isOffsetPaymentRequest(paymentData);
   const todayThaiDate = formatThaiDate(new Date());
-  if (!isOffsetPayment && await hasActivePaymentForContractOnThaiDate(contractNo, todayThaiDate)) {
+  if (
+    !isOffsetPayment &&
+    await hasActivePaymentForContractOnThaiDate(contractNo, todayThaiDate)
+  ) {
     throw new Error("เลขที่สัญญานี้มีรายการรับชำระแล้วในวันนี้");
   }
 
   if (isOffsetPayment) {
-    if (principalPaid !== currentBalance) throw new Error("การกลบหนี้ต้องชำระเต็มยอดคงค้างของสัญญา");
-    if (interestPaid !== 0) throw new Error("การกลบหนี้ไม่อนุญาตให้บันทึกยอดดอกเบี้ยในรายการเดียวกัน");
+    if (principalPaid !== currentBalance) {
+      throw new Error("การกลบหนี้ต้องชำระเต็มยอดคงค้างของสัญญา");
+    }
+    if (interestPaid !== 0) {
+      throw new Error("การกลบหนี้ไม่อนุญาตให้บันทึกยอดดอกเบี้ยในรายการเดียวกัน");
+    }
   }
 
-  const expectedMonthlyInterest = Math.floor(currentBalance * (annualInterestRate / 100) / 12);
-  const interestMonthsPaid = isOffsetPayment ? 0 : Math.max(1, Number(paymentData.interestMonthsPaid) || 1);
+  const expectedMonthlyInterest = Math.floor(
+    currentBalance * (annualInterestRate / 100) / 12,
+  );
+  const interestMonthsPaid = isOffsetPayment
+    ? 0
+    : Math.max(1, Number(paymentData.interestMonthsPaid) || 1);
   if (!isOffsetPayment && expectedMonthlyInterest > 0) {
     const expectedInterestPaid = expectedMonthlyInterest * interestMonthsPaid;
     if (interestPaid !== expectedInterestPaid) {
-      throw new Error("ยอดชำระดอกเบี้ยต้องตรงกับที่ระบบคำนวณอัตโนมัติจากจำนวนงวดดอกที่เลือก");
+      throw new Error(
+        "ยอดชำระดอกเบี้ยต้องตรงกับที่ระบบคำนวณอัตโนมัติจากจำนวนงวดดอกที่เลือก",
+      );
     }
   }
-  if (!isOffsetPayment && principalPaid > 0 && expectedMonthlyInterest > 0 && interestPaid <= 0) {
+  if (
+    !isOffsetPayment && principalPaid > 0 && expectedMonthlyInterest > 0 &&
+    interestPaid <= 0
+  ) {
     throw new Error("การชำระเงินต้นต้องชำระดอกเบี้ยตามที่ระบบคำนวณด้วย");
   }
 
   const recalculatedNewBalance = Math.max(0, currentBalance - principalPaid);
-  if (Math.abs(newBalance - recalculatedNewBalance) > 0.0001) newBalance = recalculatedNewBalance;
+  if (Math.abs(newBalance - recalculatedNewBalance) > 0.0001) {
+    newBalance = recalculatedNewBalance;
+  }
 
-  const oldMissedInterestMonths = Math.max(0, Number(paymentData.currentMissedInterestMonths ?? loanRow.overdue_months) || 0);
-  const newMissedInterestMonths = isOffsetPayment ? 0 : Math.max(0, Number(paymentData.newMissedInterestMonths ?? oldMissedInterestMonths) || 0);
+  const oldMissedInterestMonths = Math.max(
+    0,
+    Number(paymentData.currentMissedInterestMonths ?? loanRow.overdue_months) ||
+      0,
+  );
+  const newMissedInterestMonths = isOffsetPayment ? 0 : Math.max(
+    0,
+    Number(paymentData.newMissedInterestMonths ?? oldMissedInterestMonths) ||
+      0,
+  );
   const serverStatus = isOffsetPayment
     ? "ปิดบัญชี(กลบหนี้)"
-    : deriveLoanStatusFromState(newBalance, newMissedInterestMonths, newBalance <= 0 ? "ปิดบัญชี" : normalizeText(paymentData.customStatus) || "ปกติ");
+    : deriveLoanStatusFromState(
+      newBalance,
+      newMissedInterestMonths,
+      newBalance <= 0
+        ? "ปิดบัญชี"
+        : normalizeText(paymentData.customStatus) || "ปกติ",
+    );
   let serverNote = normalizeText(paymentData.note);
   if (isOffsetPayment) serverNote = "กลบหนี้ด้วยเงินฝากสัจจะ";
   else if (newBalance <= 0) serverNote = "ปิดบัญชี";
@@ -1904,7 +2341,15 @@ const savePayment = async (payload: RpcPayload) => {
     overdue_months: newMissedInterestMonths,
   });
 
-  return buildSavePaymentResponse(txId, timestamp, { ...paymentData, contract: contractNo, newBalance }, authoritativeMemberId, authoritativeMemberName, serverStatus, serverNote) as JsonObject;
+  return buildSavePaymentResponse(
+    txId,
+    timestamp,
+    { ...paymentData, contract: contractNo, newBalance },
+    authoritativeMemberId,
+    authoritativeMemberName,
+    serverStatus,
+    serverNote,
+  ) as JsonObject;
 };
 
 const cancelPayment = async (payload: RpcPayload) => {
@@ -1928,20 +2373,44 @@ const cancelPayment = async (payload: RpcPayload) => {
   const normalizedReason = sanitizeReverseReason(reason);
   if (!normalizedReason) throw new Error("กรุณาระบุเหตุผลการกลับรายการ");
 
-  const latestActiveTx = await findLatestActiveTransactionForContract(contractNo);
-  if (!latestActiveTx || normalizeText(latestActiveTx.reference_id) !== normalizedTransactionId) {
-    throw new Error("รองรับการลบได้เฉพาะรายการรับชำระล่าสุดของสัญญาในช่วง migration นี้");
+  const latestActiveTx = await findLatestActiveTransactionForContract(
+    contractNo,
+  );
+  if (
+    !latestActiveTx ||
+    normalizeText(latestActiveTx.reference_id) !== normalizedTransactionId
+  ) {
+    throw new Error(
+      "รองรับการลบได้เฉพาะรายการรับชำระล่าสุดของสัญญาในช่วง migration นี้",
+    );
   }
 
   const currentLoan = await getLoanByContractNo(contractNo);
   if (!currentLoan) throw new Error(`ไม่พบเลขที่สัญญา: ${contractNo}`);
 
-  const finalBalance = Math.max(0, (Number(matchedTx.outstanding_balance) || 0) + (Number(matchedTx.principal_paid) || 0));
-  const finalMissedInterestMonths = Math.max(0, Number(matchedTx.overdue_interest_before) || 0);
-  const finalStatus = deriveLoanStatusFromState(finalBalance, finalMissedInterestMonths, Number(finalBalance) <= 0 ? "ปิดบัญชี" : "ปกติ");
-  const reversalTransactionId = `REV-${crypto.randomUUID().replace(/-/g, "").slice(0, 20)}`;
+  const finalBalance = Math.max(
+    0,
+    (Number(matchedTx.outstanding_balance) || 0) +
+      (Number(matchedTx.principal_paid) || 0),
+  );
+  const finalMissedInterestMonths = Math.max(
+    0,
+    Number(matchedTx.overdue_interest_before) || 0,
+  );
+  const finalStatus = deriveLoanStatusFromState(
+    finalBalance,
+    finalMissedInterestMonths,
+    Number(finalBalance) <= 0 ? "ปิดบัญชี" : "ปกติ",
+  );
+  const reversalTransactionId = `REV-${
+    crypto.randomUUID().replace(/-/g, "").slice(0, 20)
+  }`;
   const reversalTimestamp = formatThaiDateTime(new Date());
-  const reversalNote = buildReverseTransactionNote(normalizedTransactionId, normalizedReason, reversalTransactionId);
+  const reversalNote = buildReverseTransactionNote(
+    normalizedTransactionId,
+    normalizedReason,
+    reversalTransactionId,
+  );
 
   await insertSupabaseRows("transactions", {
     reference_id: reversalTransactionId,
@@ -1960,9 +2429,15 @@ const cancelPayment = async (payload: RpcPayload) => {
     overdue_interest_after: finalMissedInterestMonths,
   });
 
-  await patchSupabaseRows("transactions", { reference_id: `eq.${normalizedTransactionId}` }, {
+  await patchSupabaseRows("transactions", {
+    reference_id: `eq.${normalizedTransactionId}`,
+  }, {
     tx_status: "ยกเลิก",
-    note: buildReverseTransactionNote(normalizedTransactionId, normalizedReason, reversalTransactionId),
+    note: buildReverseTransactionNote(
+      normalizedTransactionId,
+      normalizedReason,
+      reversalTransactionId,
+    ),
   });
 
   await patchSupabaseRows("loans", { contract_no: `eq.${contractNo}` }, {
@@ -1990,7 +2465,9 @@ const addMember = async (payload: RpcPayload) => {
   requirePermission(session, "members.manage", "ไม่มีสิทธิ์เพิ่มสมาชิก");
 
   const rawArg = payload.args?.[0];
-  const parsed = typeof rawArg === "string" ? JSON.parse(rawArg) as Record<string, unknown> : ((rawArg as Record<string, unknown>) || {});
+  const parsed = typeof rawArg === "string"
+    ? JSON.parse(rawArg) as Record<string, unknown>
+    : ((rawArg as Record<string, unknown>) || {});
   const member = validateMemberPayloadForWrite(parsed);
 
   const existingRows = await callSupabase("members", {
@@ -2002,7 +2479,11 @@ const addMember = async (payload: RpcPayload) => {
     return { status: "Duplicate ID" } as JsonObject;
   }
 
-  const upgraded = await upgradeTemporaryMemberToReal(member.id, member.name, member.status);
+  const upgraded = await upgradeTemporaryMemberToReal(
+    member.id,
+    member.name,
+    member.status,
+  );
   if (upgraded) {
     return {
       action: "upgradedTemporaryGuarantor",
@@ -2023,7 +2504,9 @@ const updateMember = async (payload: RpcPayload) => {
   requirePermission(session, "members.manage", "ไม่มีสิทธิ์แก้ไขสมาชิก");
 
   const rawArg = payload.args?.[0];
-  const parsed = typeof rawArg === "string" ? JSON.parse(rawArg) as Record<string, unknown> : ((rawArg as Record<string, unknown>) || {});
+  const parsed = typeof rawArg === "string"
+    ? JSON.parse(rawArg) as Record<string, unknown>
+    : ((rawArg as Record<string, unknown>) || {});
   const member = validateMemberPayloadForWrite(parsed);
 
   const rows = await callSupabase("members", {
@@ -2049,7 +2532,11 @@ const updateMember = async (payload: RpcPayload) => {
   });
 
   await syncLoanBorrowerNameForMember(member.id, member.name);
-  await syncGuarantorReferencesForMember(member.id, previousMemberName, member.name);
+  await syncGuarantorReferencesForMember(
+    member.id,
+    previousMemberName,
+    member.name,
+  );
   return { ok: true } as JsonObject;
 };
 
@@ -2058,7 +2545,9 @@ const addLoan = async (payload: RpcPayload) => {
   requirePermission(session, "loans.manage", "ไม่มีสิทธิ์เพิ่มสัญญาเงินกู้");
 
   const rawArg = payload.args?.[0];
-  const parsed = typeof rawArg === "string" ? JSON.parse(rawArg) as Record<string, unknown> : ((rawArg as Record<string, unknown>) || {});
+  const parsed = typeof rawArg === "string"
+    ? JSON.parse(rawArg) as Record<string, unknown>
+    : ((rawArg as Record<string, unknown>) || {});
   const loanData = validateLoanPayloadForWrite(parsed);
 
   const existingLoan = await getLoanByContractNo(loanData.contract);
@@ -2066,9 +2555,15 @@ const addLoan = async (payload: RpcPayload) => {
     throw new Error("เลขที่สัญญานี้มีในระบบแล้ว");
   }
 
-  const createdAt = normalizeLoanCreatedAt(loanData.createdAt) || formatThaiDate(new Date());
-  const autoApprovedStatus = loanData.status && loanData.status !== "รออนุมัติ" ? loanData.status : "ปกติ";
-  const normalizedGuarantors = await normalizeLoanGuarantorsForSave(loanData.guarantor1, loanData.guarantor2);
+  const createdAt = normalizeLoanCreatedAt(loanData.createdAt) ||
+    formatThaiDate(new Date());
+  const autoApprovedStatus = loanData.status && loanData.status !== "รออนุมัติ"
+    ? loanData.status
+    : "ปกติ";
+  const normalizedGuarantors = await normalizeLoanGuarantorsForSave(
+    loanData.guarantor1,
+    loanData.guarantor2,
+  );
 
   await insertLoanRow({
     ...loanData,
@@ -2092,7 +2587,9 @@ const editLoan = async (payload: RpcPayload) => {
   requirePermission(session, "loans.manage", "ไม่มีสิทธิ์แก้ไขสัญญาเงินกู้");
 
   const rawArg = payload.args?.[0];
-  const parsed = typeof rawArg === "string" ? JSON.parse(rawArg) as Record<string, unknown> : ((rawArg as Record<string, unknown>) || {});
+  const parsed = typeof rawArg === "string"
+    ? JSON.parse(rawArg) as Record<string, unknown>
+    : ((rawArg as Record<string, unknown>) || {});
   const loanData = validateLoanPayloadForWrite(parsed);
 
   const existingLoan = await getLoanByContractNo(loanData.contract);
@@ -2100,9 +2597,16 @@ const editLoan = async (payload: RpcPayload) => {
     throw new Error("ไม่พบเลขที่สัญญา");
   }
 
-  const currentCreatedAt = normalizeLoanCreatedAt(existingLoan.created_date_text);
-  const createdAt = normalizeLoanCreatedAt(loanData.createdAt || currentCreatedAt) || formatThaiDate(new Date());
-  const normalizedGuarantors = await normalizeLoanGuarantorsForSave(loanData.guarantor1, loanData.guarantor2);
+  const currentCreatedAt = normalizeLoanCreatedAt(
+    existingLoan.created_date_text,
+  );
+  const createdAt =
+    normalizeLoanCreatedAt(loanData.createdAt || currentCreatedAt) ||
+    formatThaiDate(new Date());
+  const normalizedGuarantors = await normalizeLoanGuarantorsForSave(
+    loanData.guarantor1,
+    loanData.guarantor2,
+  );
 
   await patchSupabaseRows("loans", { contract_no: `eq.${loanData.contract}` }, {
     member_id: loanData.memberId,
@@ -2151,7 +2655,10 @@ const updateLoanStatus = async (payload: RpcPayload) => {
   await patchSupabaseRows("loans", { contract_no: `eq.${contractNo}` }, {
     status,
     raw_json: {
-      ...normalizeJsonSetting<Record<string, JsonValue>>(existingLoan.raw_json, {} as Record<string, JsonValue>),
+      ...normalizeJsonSetting<Record<string, JsonValue>>(
+        existingLoan.raw_json,
+        {} as Record<string, JsonValue>,
+      ),
       contract: normalizeText(existingLoan.contract_no),
       memberId: normalizeText(existingLoan.member_id),
       member: normalizeText(existingLoan.borrower_name),
@@ -2160,7 +2667,10 @@ const updateLoanStatus = async (payload: RpcPayload) => {
       balance: Number(existingLoan.outstanding_balance) || 0,
       status,
       nextPayment: normalizeText(existingLoan.due_date_text) || "-",
-      missedInterestMonths: Math.max(0, Number(existingLoan.overdue_months) || 0),
+      missedInterestMonths: Math.max(
+        0,
+        Number(existingLoan.overdue_months) || 0,
+      ),
       createdAt: normalizeLoanCreatedAt(existingLoan.created_date_text),
       guarantor1: normalizeText(existingLoan.guarantor_1),
       guarantor2: normalizeText(existingLoan.guarantor_2),
@@ -2212,7 +2722,8 @@ const getPaymentLookupByMemberId = async (memberId: unknown) => {
   const currentMonthContext = getCurrentThaiMonthContext();
   const [loanRows, txRows] = await Promise.all([
     callSupabase("loans", {
-      select: "contract_no,member_id,borrower_name,principal_amount,interest_rate,outstanding_balance,status,due_date_text,overdue_months,created_date_text,guarantor_1,guarantor_2",
+      select:
+        "contract_no,member_id,borrower_name,principal_amount,interest_rate,outstanding_balance,status,due_date_text,overdue_months,created_date_text,guarantor_1,guarantor_2",
       member_id: `eq.${normalizedMemberId}`,
       order: "outstanding_balance.desc,contract_no.asc",
       limit: "500",
@@ -2224,7 +2735,11 @@ const getPaymentLookupByMemberId = async (memberId: unknown) => {
       limit: "1000",
     }),
   ]);
-  const currentMonthInterestPaidMap = buildCurrentMonthInterestPaidMapFromSupabaseRows(txRows, currentMonthContext);
+  const currentMonthInterestPaidMap =
+    buildCurrentMonthInterestPaidMapFromSupabaseRows(
+      txRows,
+      currentMonthContext,
+    );
   const loans = loanRows.map((row) =>
     buildPaymentLoanFromSupabaseLoanRow(
       row,
@@ -2235,7 +2750,11 @@ const getPaymentLookupByMemberId = async (memberId: unknown) => {
   ).sort((a, b) => {
     const balanceDiff = (Number(b.balance) || 0) - (Number(a.balance) || 0);
     if (balanceDiff !== 0) return balanceDiff;
-    return String(a.contract || "").localeCompare(String(b.contract || ""), "th", { numeric: true, sensitivity: "base" });
+    return String(a.contract || "").localeCompare(
+      String(b.contract || ""),
+      "th",
+      { numeric: true, sensitivity: "base" },
+    );
   });
 
   return {
@@ -2259,7 +2778,8 @@ const getTodayTransactionsForMemberPaymentEdit = async (memberId: unknown) => {
 
   const todayThaiDate = formatThaiDate(new Date());
   const rows = await callSupabase("transactions", {
-    select: "reference_id,occurred_on_text,contract_no,member_id,principal_paid,interest_paid,outstanding_balance,note,full_name,tx_status,interest_months_paid,overdue_interest_before,overdue_interest_after",
+    select:
+      "reference_id,occurred_on_text,contract_no,member_id,principal_paid,interest_paid,outstanding_balance,note,full_name,tx_status,interest_months_paid,overdue_interest_before,overdue_interest_after",
     member_id: `eq.${normalizedMemberId}`,
     order: "updated_at.desc",
     limit: "500",
@@ -2271,18 +2791,26 @@ const getTodayTransactionsForMemberPaymentEdit = async (memberId: unknown) => {
       const dateOnly = normalizeText(tx.timestamp).split(" ")[0] || "";
       return dateOnly === todayThaiDate;
     })
-    .sort((a, b) => String(b.timestamp || "").localeCompare(String(a.timestamp || "")));
+    .sort((a, b) =>
+      String(b.timestamp || "").localeCompare(String(a.timestamp || ""))
+    );
 
   return {
     memberId: normalizedMemberId,
-    memberName: transactions.length ? normalizeText(transactions[0].memberName) : "",
+    memberName: transactions.length
+      ? normalizeText(transactions[0].memberName)
+      : "",
     transactions,
   };
 };
 
 const getNotificationSettings = async (payload: RpcPayload) => {
   const { session } = await resolveSession(payload);
-  requireAnyPermission(session, ["notifications.manage", "settings.manage"], "ไม่มีสิทธิ์ดูการตั้งค่าการแจ้งเตือน");
+  requireAnyPermission(
+    session,
+    ["notifications.manage", "settings.manage"],
+    "ไม่มีสิทธิ์ดูการตั้งค่าการแจ้งเตือน",
+  );
 
   const settingsMap = await getSettingsMapSnapshot();
   return {
@@ -2298,33 +2826,54 @@ const saveSettings = async (payload: RpcPayload) => {
     ? normalizeSettingsInputObject(JSON.parse(rawArg || "{}"))
     : normalizeSettingsInputObject(rawArg);
 
-  const hasOwn = (key: string) => Object.prototype.hasOwnProperty.call(settingsData, key);
+  const hasOwn = (key: string) =>
+    Object.prototype.hasOwnProperty.call(settingsData, key);
   const wantsNotificationSettings = hasOwn("notificationSettings");
   const wantsInterestRate = hasOwn("interestRate");
   const wantsReportLayoutSettings = hasOwn("reportLayoutSettings");
   const wantsMenuSettings = hasOwn("menuSettings");
 
-  if (!wantsNotificationSettings && !wantsInterestRate && !wantsReportLayoutSettings && !wantsMenuSettings) {
+  if (
+    !wantsNotificationSettings && !wantsInterestRate &&
+    !wantsReportLayoutSettings && !wantsMenuSettings
+  ) {
     requirePermission(session, "settings.manage", "ไม่มีสิทธิ์แก้ไขการตั้งค่าระบบ");
-  } else if (wantsInterestRate || wantsReportLayoutSettings || wantsMenuSettings) {
+  } else if (
+    wantsInterestRate || wantsReportLayoutSettings || wantsMenuSettings
+  ) {
     requirePermission(session, "settings.manage", "ไม่มีสิทธิ์แก้ไขการตั้งค่าระบบ");
   } else if (wantsNotificationSettings) {
-    requireAnyPermission(session, ["notifications.manage", "settings.manage"], "ไม่มีสิทธิ์จัดการการแจ้งเตือนอีเมล");
+    requireAnyPermission(
+      session,
+      ["notifications.manage", "settings.manage"],
+      "ไม่มีสิทธิ์จัดการการแจ้งเตือนอีเมล",
+    );
   }
 
   const existingSettingsMap = await getSettingsMapSnapshot();
-  const updates: Record<string, { valueText: string; valueJson?: JsonValue | null }> = {};
+  const updates: Record<
+    string,
+    { valueText: string; valueJson?: JsonValue | null }
+  > = {};
 
   if (wantsInterestRate) {
     let normalizedInterestRate = Number(settingsData.interestRate);
-    if (!Number.isFinite(normalizedInterestRate) || normalizedInterestRate <= 0) {
-      normalizedInterestRate = Number(existingSettingsMap.InterestRate) || DEFAULT_INTEREST_RATE;
+    if (
+      !Number.isFinite(normalizedInterestRate) || normalizedInterestRate <= 0
+    ) {
+      normalizedInterestRate = Number(existingSettingsMap.InterestRate) ||
+        DEFAULT_INTEREST_RATE;
     }
-    updates.InterestRate = { valueText: String(normalizedInterestRate), valueJson: null };
+    updates.InterestRate = {
+      valueText: String(normalizedInterestRate),
+      valueJson: null,
+    };
   }
 
   if (wantsReportLayoutSettings) {
-    const normalizedReportLayoutSettings = normalizeSettingsInputObject(settingsData.reportLayoutSettings);
+    const normalizedReportLayoutSettings = normalizeSettingsInputObject(
+      settingsData.reportLayoutSettings,
+    );
     updates[REPORT_LAYOUT_SETTINGS_KEY] = {
       valueText: JSON.stringify(normalizedReportLayoutSettings),
       valueJson: normalizedReportLayoutSettings as JsonObject,
@@ -2332,7 +2881,9 @@ const saveSettings = async (payload: RpcPayload) => {
   }
 
   if (wantsMenuSettings) {
-    const normalizedMenuSettings = normalizeSettingsInputObject(settingsData.menuSettings);
+    const normalizedMenuSettings = normalizeSettingsInputObject(
+      settingsData.menuSettings,
+    );
     updates[MENU_SETTINGS_KEY] = {
       valueText: JSON.stringify(normalizedMenuSettings),
       valueJson: normalizedMenuSettings as JsonObject,
@@ -2340,17 +2891,49 @@ const saveSettings = async (payload: RpcPayload) => {
   }
 
   if (wantsNotificationSettings) {
-    const notificationSettings = normalizeSettingsInputObject(settingsData.notificationSettings);
-    updates.NotificationRecipients = { valueText: normalizeText(notificationSettings.recipients), valueJson: null };
-    updates.NotifyApprovalSubmitted = { valueText: String(!!notificationSettings.notifyApprovalSubmitted), valueJson: null };
-    updates.NotifyApprovalApproved = { valueText: String(!!notificationSettings.notifyApprovalApproved), valueJson: null };
-    updates.NotifyApprovalRejected = { valueText: String(!!notificationSettings.notifyApprovalRejected), valueJson: null };
-    updates.NotifyAttachmentUploaded = { valueText: String(!!notificationSettings.notifyAttachmentUploaded), valueJson: null };
-    updates.NotifyPaymentCreated = { valueText: String(!!notificationSettings.notifyPaymentCreated), valueJson: null };
-    updates.NotifyPaymentReversed = { valueText: String(!!notificationSettings.notifyPaymentReversed), valueJson: null };
-    updates.NotifyReportArchived = { valueText: String(!!notificationSettings.notifyReportArchived), valueJson: null };
-    updates.NotifyAccountingClosed = { valueText: String(!!notificationSettings.notifyAccountingClosed), valueJson: null };
-    updates.NotifyBackupCompleted = { valueText: String(!!notificationSettings.notifyBackupCompleted), valueJson: null };
+    const notificationSettings = normalizeSettingsInputObject(
+      settingsData.notificationSettings,
+    );
+    updates.NotificationRecipients = {
+      valueText: normalizeText(notificationSettings.recipients),
+      valueJson: null,
+    };
+    updates.NotifyApprovalSubmitted = {
+      valueText: String(!!notificationSettings.notifyApprovalSubmitted),
+      valueJson: null,
+    };
+    updates.NotifyApprovalApproved = {
+      valueText: String(!!notificationSettings.notifyApprovalApproved),
+      valueJson: null,
+    };
+    updates.NotifyApprovalRejected = {
+      valueText: String(!!notificationSettings.notifyApprovalRejected),
+      valueJson: null,
+    };
+    updates.NotifyAttachmentUploaded = {
+      valueText: String(!!notificationSettings.notifyAttachmentUploaded),
+      valueJson: null,
+    };
+    updates.NotifyPaymentCreated = {
+      valueText: String(!!notificationSettings.notifyPaymentCreated),
+      valueJson: null,
+    };
+    updates.NotifyPaymentReversed = {
+      valueText: String(!!notificationSettings.notifyPaymentReversed),
+      valueJson: null,
+    };
+    updates.NotifyReportArchived = {
+      valueText: String(!!notificationSettings.notifyReportArchived),
+      valueJson: null,
+    };
+    updates.NotifyAccountingClosed = {
+      valueText: String(!!notificationSettings.notifyAccountingClosed),
+      valueJson: null,
+    };
+    updates.NotifyBackupCompleted = {
+      valueText: String(!!notificationSettings.notifyBackupCompleted),
+      valueJson: null,
+    };
   }
 
   if (Object.keys(updates).length > 0) {
@@ -2390,7 +2973,10 @@ const handlers: Record<string, (payload: RpcPayload) => Promise<Response>> = {
         role: session.role || "admin",
       });
     } catch (error) {
-      return appError((error as Error)?.message || "ไม่สามารถสร้าง session ได้", "CREATE_GUEST_SESSION_FAILED");
+      return appError(
+        (error as Error)?.message || "ไม่สามารถสร้าง session ได้",
+        "CREATE_GUEST_SESSION_FAILED",
+      );
     }
   },
   async getSessionSnapshot(payload) {
@@ -2403,7 +2989,10 @@ const handlers: Record<string, (payload: RpcPayload) => Promise<Response>> = {
         serverTime: formatThaiDateTime(new Date()),
       });
     } catch (error) {
-      return appError((error as Error)?.message || "ไม่สามารถตรวจสอบสถานะ session ได้", "SESSION_SNAPSHOT_FAILED");
+      return appError(
+        (error as Error)?.message || "ไม่สามารถตรวจสอบสถานะ session ได้",
+        "SESSION_SNAPSHOT_FAILED",
+      );
     }
   },
   async getAppRuntimeSnapshot(payload) {
@@ -2411,7 +3000,10 @@ const handlers: Record<string, (payload: RpcPayload) => Promise<Response>> = {
       const { session } = await resolveSession(payload);
       return success(await buildAppRuntimePayload(session, false));
     } catch (error) {
-      return appError((error as Error)?.message || "ไม่สามารถโหลด runtime snapshot ได้", "APP_RUNTIME_SNAPSHOT_FAILED");
+      return appError(
+        (error as Error)?.message || "ไม่สามารถโหลด runtime snapshot ได้",
+        "APP_RUNTIME_SNAPSHOT_FAILED",
+      );
     }
   },
   async getAppData(payload) {
@@ -2419,7 +3011,10 @@ const handlers: Record<string, (payload: RpcPayload) => Promise<Response>> = {
       const { session } = await resolveSession(payload);
       return success(await buildAppRuntimePayload(session, true));
     } catch (error) {
-      return appError((error as Error)?.message || "ไม่สามารถโหลดข้อมูลระบบได้", "APP_DATA_FAILED");
+      return appError(
+        (error as Error)?.message || "ไม่สามารถโหลดข้อมูลระบบได้",
+        "APP_DATA_FAILED",
+      );
     }
   },
   async getPaymentReadyData(payload) {
@@ -2427,7 +3022,10 @@ const handlers: Record<string, (payload: RpcPayload) => Promise<Response>> = {
       await resolveSession(payload);
       return success(await buildPaymentReadyData());
     } catch (error) {
-      return appError((error as Error)?.message || "ไม่สามารถโหลดข้อมูลรับชำระได้", "PAYMENT_READY_DATA_FAILED");
+      return appError(
+        (error as Error)?.message || "ไม่สามารถโหลดข้อมูลรับชำระได้",
+        "PAYMENT_READY_DATA_FAILED",
+      );
     }
   },
   async getPaymentLookupByMemberId(payload) {
@@ -2435,76 +3033,110 @@ const handlers: Record<string, (payload: RpcPayload) => Promise<Response>> = {
       await resolveSession(payload);
       return success(await getPaymentLookupByMemberId(payload.args?.[0]));
     } catch (error) {
-      return appError((error as Error)?.message || "ค้นหาข้อมูลรับชำระไม่สำเร็จ", "PAYMENT_LOOKUP_FAILED", {
-        loans: [],
-        todayTransactions: [],
-      });
+      return appError(
+        (error as Error)?.message || "ค้นหาข้อมูลรับชำระไม่สำเร็จ",
+        "PAYMENT_LOOKUP_FAILED",
+        {
+          loans: [],
+          todayTransactions: [],
+        },
+      );
     }
   },
   async getTodayTransactionsForMemberPaymentEdit(payload) {
     try {
       await resolveSession(payload);
-      return success(await getTodayTransactionsForMemberPaymentEdit(payload.args?.[0]));
+      return success(
+        await getTodayTransactionsForMemberPaymentEdit(payload.args?.[0]),
+      );
     } catch (error) {
-      return appError((error as Error)?.message || "โหลดรายการรับชำระของสมาชิกไม่สำเร็จ", "TODAY_TRANSACTIONS_FAILED", {
-        transactions: [],
-      });
+      return appError(
+        (error as Error)?.message || "โหลดรายการรับชำระของสมาชิกไม่สำเร็จ",
+        "TODAY_TRANSACTIONS_FAILED",
+        {
+          transactions: [],
+        },
+      );
     }
   },
   async verifyLoginPin(payload) {
     try {
       return success(await verifyLoginPin(payload));
     } catch (error) {
-      return appError((error as Error)?.message || "เข้าสู่ระบบไม่สำเร็จ", "VERIFY_LOGIN_PIN_FAILED");
+      return appError(
+        (error as Error)?.message || "เข้าสู่ระบบไม่สำเร็จ",
+        "VERIFY_LOGIN_PIN_FAILED",
+      );
     }
   },
   async savePayment(payload) {
     try {
       return success(await savePayment(payload));
     } catch (error) {
-      return appError((error as Error)?.message || "ระบบขัดข้องในการบันทึกรายการรับชำระ", "SAVE_PAYMENT_FAILED");
+      return appError(
+        (error as Error)?.message || "ระบบขัดข้องในการบันทึกรายการรับชำระ",
+        "SAVE_PAYMENT_FAILED",
+      );
     }
   },
   async cancelPayment(payload) {
     try {
       return success(await cancelPayment(payload));
     } catch (error) {
-      return appError((error as Error)?.message || "ระบบขัดข้องในการลบรายการรับชำระ", "CANCEL_PAYMENT_FAILED");
+      return appError(
+        (error as Error)?.message || "ระบบขัดข้องในการลบรายการรับชำระ",
+        "CANCEL_PAYMENT_FAILED",
+      );
     }
   },
   async addMember(payload) {
     try {
       return success(await addMember(payload));
     } catch (error) {
-      return appError((error as Error)?.message || "ไม่สามารถเพิ่มสมาชิกได้", "ADD_MEMBER_FAILED");
+      return appError(
+        (error as Error)?.message || "ไม่สามารถเพิ่มสมาชิกได้",
+        "ADD_MEMBER_FAILED",
+      );
     }
   },
   async updateMember(payload) {
     try {
       return success(await updateMember(payload));
     } catch (error) {
-      return appError((error as Error)?.message || "ไม่สามารถแก้ไขสมาชิกได้", "UPDATE_MEMBER_FAILED");
+      return appError(
+        (error as Error)?.message || "ไม่สามารถแก้ไขสมาชิกได้",
+        "UPDATE_MEMBER_FAILED",
+      );
     }
   },
   async addLoan(payload) {
     try {
       return success(await addLoan(payload));
     } catch (error) {
-      return appError((error as Error)?.message || "ไม่สามารถเพิ่มสัญญาเงินกู้ได้", "ADD_LOAN_FAILED");
+      return appError(
+        (error as Error)?.message || "ไม่สามารถเพิ่มสัญญาเงินกู้ได้",
+        "ADD_LOAN_FAILED",
+      );
     }
   },
   async editLoan(payload) {
     try {
       return success(await editLoan(payload));
     } catch (error) {
-      return appError((error as Error)?.message || "ไม่สามารถแก้ไขสัญญาเงินกู้ได้", "EDIT_LOAN_FAILED");
+      return appError(
+        (error as Error)?.message || "ไม่สามารถแก้ไขสัญญาเงินกู้ได้",
+        "EDIT_LOAN_FAILED",
+      );
     }
   },
   async updateLoanStatus(payload) {
     try {
       return success(await updateLoanStatus(payload));
     } catch (error) {
-      return appError((error as Error)?.message || "ไม่สามารถอัปเดตสถานะสัญญาได้", "UPDATE_LOAN_STATUS_FAILED");
+      return appError(
+        (error as Error)?.message || "ไม่สามารถอัปเดตสถานะสัญญาได้",
+        "UPDATE_LOAN_STATUS_FAILED",
+      );
     }
   },
   async deleteLoan(payload) {
@@ -2553,7 +3185,10 @@ const handlers: Record<string, (payload: RpcPayload) => Promise<Response>> = {
     try {
       return success(await saveSettings(payload));
     } catch (error) {
-      return appError((error as Error)?.message || "ไม่สามารถบันทึกการตั้งค่าได้", "SAVE_SETTINGS_FAILED");
+      return appError(
+        (error as Error)?.message || "ไม่สามารถบันทึกการตั้งค่าได้",
+        "SAVE_SETTINGS_FAILED",
+      );
     }
   },
 };
