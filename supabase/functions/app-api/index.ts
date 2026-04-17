@@ -2713,9 +2713,12 @@ const getPaymentLookupByMemberId = async (memberId: unknown) => {
     return {
       status: "Error",
       message: "กรุณาระบุรหัสสมาชิก",
+      memberId: "",
+      memberName: "",
       loans: [],
       todayTransactions: [],
-    };
+      interestRate: DEFAULT_INTEREST_RATE,
+    } as JsonObject;
   }
 
   const settingsMap = await getSettingsMapSnapshot();
@@ -2763,7 +2766,7 @@ const getPaymentLookupByMemberId = async (memberId: unknown) => {
     loans,
     todayTransactions: [],
     interestRate: Number(settingsMap.InterestRate) || DEFAULT_INTEREST_RATE,
-  };
+  } as JsonObject;
 };
 
 const getTodayTransactionsForMemberPaymentEdit = async (memberId: unknown) => {
@@ -2772,8 +2775,10 @@ const getTodayTransactionsForMemberPaymentEdit = async (memberId: unknown) => {
     return {
       status: "Error",
       message: "กรุณาระบุรหัสสมาชิก",
+      memberId: "",
+      memberName: "",
       transactions: [],
-    };
+    } as JsonObject;
   }
 
   const todayThaiDate = formatThaiDate(new Date());
@@ -2801,7 +2806,7 @@ const getTodayTransactionsForMemberPaymentEdit = async (memberId: unknown) => {
       ? normalizeText(transactions[0].memberName)
       : "",
     transactions,
-  };
+  } as JsonObject;
 };
 
 const getNotificationSettings = async (payload: RpcPayload) => {
