@@ -51,12 +51,13 @@
 
 สถานะล่าสุด:
 
-- `verifyLoginPin`, `savePayment`, `cancelPayment`, `addMember`, `updateMember`, `addLoan`, `editLoan`, `getNotificationSettings`, `saveSettings` ถูกย้ายมารอบแรกแล้วใน Edge Function
+- `verifyLoginPin`, `savePayment`, `cancelPayment`, `addMember`, `updateMember`, `addLoan`, `editLoan`, `updateLoanStatus`, `deleteLoan`, `getNotificationSettings`, `saveSettings` ถูกย้ายมารอบแรกแล้วใน Edge Function
 - `cancelPayment` ยังจำกัดที่การกลับรายการล่าสุดของสัญญา เพื่อหลีกเลี่ยงยอดเพี้ยนก่อนย้าย engine คำนวณย้อนหลังครบ
 - `addMember` รองรับการอัปเกรด `ผู้ค้ำชั่วคราว` เป็นสมาชิกจริงเมื่อจับคู่ชื่อได้ชัดเจนเพียงรายการเดียว
 - `saveSettings` รองรับ `interestRate`, `notificationSettings`, `reportLayoutSettings`, `menuSettings` โดยเขียนลง `app_settings`
 - สิทธิ์ `notifications.manage` ถูกเปิดใช้ใน Edge Function แล้ว และจะอ่านจาก `permissions_json` ของ `app_users`
 - `addLoan` และ `editLoan` รองรับการสร้างผู้ค้ำชั่วคราวอัตโนมัติ และ sync ชื่อผู้กู้กลับไปยังทะเบียนสมาชิกเมื่อแก้ชื่อผู้กู้ในสัญญา
+- `deleteLoan` จะปฏิเสธการลบถ้ามี transaction ผูกกับสัญญาอยู่แล้ว ตามกติกาเดิมของ GAS
 
 ## แนวทาง implementation ฝั่ง Supabase
 

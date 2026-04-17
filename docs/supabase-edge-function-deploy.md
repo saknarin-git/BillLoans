@@ -299,6 +299,8 @@ https://saknarin-git.github.io/BillLoans/?backend_url=https://fdtjomvkmpohdgdfbz
 - `updateMember`
 - `addLoan`
 - `editLoan`
+- `updateLoanStatus`
+- `deleteLoan`
 - `saveSettings`
 
 ข้อจำกัดปัจจุบัน:
@@ -314,8 +316,8 @@ https://saknarin-git.github.io/BillLoans/?backend_url=https://fdtjomvkmpohdgdfbz
 
 ยังมี method สำคัญที่ยังไม่ได้ย้าย เช่น:
 
-- `updateLoanStatus`
-- `deleteLoan`
+- reports/workflow/admin methods หลายตัว
+- auto backup / notification history / admin tools บางส่วน
 
 หมายเหตุ: `saveSettings` ถูกย้ายแล้ว แต่ยังมี settings/admin methods อื่นที่ยังไม่ครบ เช่นรายงานประวัติการแจ้งเตือนและ AutoBackup
 

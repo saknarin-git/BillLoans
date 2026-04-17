@@ -685,6 +685,13 @@ const patchSupabaseRows = async (
   await callSupabaseRequest("PATCH", tableName, query, payload, { Prefer: "return=minimal" });
 };
 
+const deleteSupabaseRows = async (
+  tableName: string,
+  query: Record<string, string>,
+) => {
+  await callSupabaseRequest("DELETE", tableName, query, undefined, { Prefer: "return=minimal" });
+};
+
 const insertSupabaseRows = async (
   tableName: string,
   payload: JsonObject | JsonObject[],
@@ -1632,6 +1639,17 @@ const getTransactionById = async (transactionId: unknown) => {
   return rows[0] || null;
 };
 
+const hasAnyTransactionForContract = async (contractNo: unknown) => {
+  const normalizedContractNo = normalizeText(contractNo);
+  if (!normalizedContractNo) return false;
+  const rows = await callSupabase("transactions", {
+    select: "reference_id",
+    contract_no: `eq.${normalizedContractNo}`,
+    limit: "1",
+  });
+  return rows.length > 0;
+};
+
 const findLatestActiveTransactionForContract = async (contractNo: unknown) => {
   const normalizedContractNo = normalizeText(contractNo);
   if (!normalizedContractNo) return null;
@@ -2035,6 +2053,69 @@ const editLoan = async (payload: RpcPayload) => {
   } as JsonObject;
 };
 
+const updateLoanStatus = async (payload: RpcPayload) => {
+  const { session } = await resolveSession(payload);
+  requirePermission(session, "loans.manage", "ไม่มีสิทธิ์อนุมัติหรือปรับสถานะสัญญา");
+
+  const contractNo = normalizeText(payload.args?.[0]);
+  const status = normalizeText(payload.args?.[1]);
+  if (!contractNo) throw new Error("ไม่พบเลขที่สัญญา");
+  if (!status) throw new Error("กรุณาระบุสถานะสัญญา");
+
+  const existingLoan = await getLoanByContractNo(contractNo);
+  if (!existingLoan) {
+    throw new Error("ไม่พบเลขที่สัญญา");
+  }
+
+  await patchSupabaseRows("loans", { contract_no: `eq.${contractNo}` }, {
+    status,
+    raw_json: {
+      ...normalizeJsonSetting<Record<string, JsonValue>>(existingLoan.raw_json, {} as Record<string, JsonValue>),
+      contract: normalizeText(existingLoan.contract_no),
+      memberId: normalizeText(existingLoan.member_id),
+      member: normalizeText(existingLoan.borrower_name),
+      amount: Number(existingLoan.principal_amount) || 0,
+      interest: Number(existingLoan.interest_rate) || 0,
+      balance: Number(existingLoan.outstanding_balance) || 0,
+      status,
+      nextPayment: normalizeText(existingLoan.due_date_text) || "-",
+      missedInterestMonths: Math.max(0, Number(existingLoan.overdue_months) || 0),
+      createdAt: normalizeLoanCreatedAt(existingLoan.created_date_text),
+      guarantor1: normalizeText(existingLoan.guarantor_1),
+      guarantor2: normalizeText(existingLoan.guarantor_2),
+    },
+  });
+
+  return {
+    message: "อัปเดตสถานะสัญญาเรียบร้อยแล้ว",
+    contract: contractNo,
+    status,
+  } as JsonObject;
+};
+
+const deleteLoan = async (payload: RpcPayload) => {
+  const { session } = await resolveSession(payload);
+  requirePermission(session, "loans.manage", "ไม่มีสิทธิ์ลบสัญญาเงินกู้");
+
+  const contractNo = normalizeText(payload.args?.[0]);
+  if (!contractNo) throw new Error("ไม่พบเลขที่สัญญา");
+
+  const existingLoan = await getLoanByContractNo(contractNo);
+  if (!existingLoan) {
+    throw new Error("ไม่พบเลขที่สัญญา");
+  }
+
+  if (await hasAnyTransactionForContract(contractNo)) {
+    throw new Error("สัญญานี้มีประวัติธุรกรรมแล้ว ไม่อนุญาตให้ลบถาวร");
+  }
+
+  await deleteSupabaseRows("loans", { contract_no: `eq.${contractNo}` });
+  return {
+    message: "ลบข้อมูลสัญญาสำเร็จ",
+    contract: contractNo,
+  } as JsonObject;
+};
+
 const getPaymentLookupByMemberId = async (memberId: unknown) => {
   const normalizedMemberId = normalizeText(memberId);
   if (!normalizedMemberId) {
@@ -2336,6 +2417,20 @@ const handlers: Record<string, (payload: RpcPayload) => Promise<Response>> = {
       return success(await editLoan(payload));
     } catch (error) {
       return appError((error as Error)?.message || "ไม่สามารถแก้ไขสัญญาเงินกู้ได้", "EDIT_LOAN_FAILED");
+    }
+  },
+  async updateLoanStatus(payload) {
+    try {
+      return success(await updateLoanStatus(payload));
+    } catch (error) {
+      return appError((error as Error)?.message || "ไม่สามารถอัปเดตสถานะสัญญาได้", "UPDATE_LOAN_STATUS_FAILED");
+    }
+  },
+  async deleteLoan(payload) {
+    try {
+      return success(await deleteLoan(payload));
+    } catch (error) {
+      return appError((error as Error)?.message || "ไม่สามารถลบสัญญาเงินกู้ได้", "DELETE_LOAN_FAILED");
     }
   },
   async getNotificationSettings(payload) {
