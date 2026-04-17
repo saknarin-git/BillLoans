@@ -862,7 +862,7 @@ const callSupabaseRequest = async (
   method: string,
   tableName: string,
   query: Record<string, string>,
-  payload?: JsonObject,
+  payload?: JsonValue,
   extraHeaders: Record<string, string> = {},
 ): Promise<SupabaseRow[]> => {
   const { supabaseUrl, serviceRoleKey } = ensureConfigured();
@@ -910,6 +910,273 @@ const deleteSupabaseRows = async (
   await callSupabaseRequest("DELETE", tableName, query, undefined, {
     Prefer: "return=minimal",
   });
+};
+
+const upsertSupabaseBatch = async (
+  tableName: string,
+  rows: JsonObject[],
+  onConflictColumns: string[] = [],
+) => {
+  if (!rows.length) return 0;
+  const query = onConflictColumns.length
+    ? { on_conflict: onConflictColumns.join(",") }
+    : {};
+  await callSupabaseRequest("POST", tableName, query, rows, {
+    Prefer: "resolution=merge-duplicates,return=minimal",
+  });
+  return rows.length;
+};
+
+const insertSupabaseBatch = async (tableName: string, rows: JsonObject[]) => {
+  if (!rows.length) return 0;
+  await callSupabaseRequest("POST", tableName, {}, rows, {
+    Prefer: "return=minimal",
+  });
+  return rows.length;
+};
+
+const getSupabaseManagedTableNames = () => [
+  "loans",
+  "members",
+  "transactions",
+  "app_settings",
+  "app_users",
+  "audit_logs",
+  "app_counters",
+];
+
+const getSupabaseSetupStatus = async (payload: RpcPayload) => {
+  const { session } = await resolveSession(payload);
+  requirePermission(session, "settings.manage", "ไม่มีสิทธิ์ดูการตั้งค่า Supabase");
+
+  const counts: Record<string, number> = {};
+  for (const tableName of getSupabaseManagedTableNames()) {
+    const rows = await callSupabase(tableName, {
+      select: "*",
+      limit: "1",
+    });
+    counts[tableName] = rows.length;
+  }
+
+  return {
+    provider: "supabase",
+    ready: true,
+    tables: getSupabaseManagedTableNames(),
+    missingTables: [],
+    counts,
+    message: "Supabase Edge Function เชื่อมต่อฐานข้อมูลได้และพบตารางหลักครบแล้ว",
+  } as JsonObject;
+};
+
+const normalizeImportedUserRow = (user: Record<string, unknown>) => {
+  const nowIso = new Date().toISOString();
+  return {
+    user_id: normalizeText(user.userId) || crypto.randomUUID(),
+    username: normalizeLower(user.username),
+    full_name: normalizeText(user.fullName),
+    email: normalizeLower(user.email),
+    password_hash: "",
+    role: normalizeRole(user.role),
+    status: normalizeUserStatus(user.status),
+    created_at_text: normalizeText(user.createdAt),
+    updated_at_text: normalizeText(user.updatedAt) ||
+      formatThaiDateTime(new Date()),
+    last_login_at_text: normalizeText(user.lastLoginAt),
+    reset_otp_hash: "",
+    reset_otp_expire_at_text: "",
+    reset_otp_requested_at_text: "",
+    reset_otp_used_at_text: "",
+    permissions_json: normalizeText(user.permissionsJson),
+    prefix: normalizeText(user.prefix),
+    first_name: normalizeText(user.firstName),
+    last_name: normalizeText(user.lastName),
+    email_verified_at_text: normalizeText(user.emailVerifiedAt),
+    pin_hash: normalizeText(user.pinHash),
+    pin_unique_key: normalizeText(user.pinUniqueKey),
+    pin_updated_at_text: normalizeText(user.pinUpdatedAt),
+    email_verify_otp_hash: "",
+    email_verify_otp_expire_at_text: "",
+    email_verify_otp_requested_at_text: "",
+    raw_json: user as JsonObject,
+    imported_at: nowIso,
+  } as JsonObject;
+};
+
+const normalizeImportedAuditLogRow = (record: Record<string, unknown>) =>
+  ({
+    occurred_at_text: normalizeText(record.timestamp),
+    username: normalizeText(record.username),
+    display_name: normalizeText(record.actorName),
+    role: normalizeText(record.role),
+    action: normalizeText(record.action),
+    entity_type: normalizeText(record.entityType),
+    entity_id: normalizeText(record.entityId),
+    reference_no: normalizeText(record.referenceNo),
+    before_json: normalizeText(record.beforeJson),
+    after_json: normalizeText(record.afterJson),
+    reason: normalizeText(record.reason),
+    details: normalizeText(record.details),
+    raw_json: record as JsonObject,
+    imported_at: new Date().toISOString(),
+  }) as JsonObject;
+
+const normalizeImportedMemberRow = (member: Record<string, unknown>) =>
+  ({
+    member_id: normalizeText(member.id),
+    full_name: normalizeText(member.name),
+    status: normalizeText(member.status),
+    raw_json: member as JsonObject,
+    updated_at: new Date().toISOString(),
+    imported_at: new Date().toISOString(),
+  }) as JsonObject;
+
+const normalizeImportedLoanRow = (loan: Record<string, unknown>) =>
+  ({
+    contract_no: normalizeText(loan.contract),
+    member_id: normalizeText(loan.memberId),
+    borrower_name: normalizeText(loan.member),
+    principal_amount: Number(loan.amount) || 0,
+    interest_rate: Number(loan.interest) || 0,
+    outstanding_balance: Number(loan.balance) || 0,
+    status: normalizeText(loan.status),
+    due_date_text: normalizeText(loan.nextPayment),
+    overdue_months: Math.max(0, Number(loan.missedInterestMonths) || 0),
+    created_date_text: normalizeLoanCreatedAt(loan.createdAt),
+    guarantor_1: normalizeText(loan.guarantor1),
+    guarantor_2: normalizeText(loan.guarantor2),
+    raw_json: loan as JsonObject,
+    updated_at: new Date().toISOString(),
+    imported_at: new Date().toISOString(),
+  }) as JsonObject;
+
+const normalizeImportedTransactionRow = (tx: Record<string, unknown>) =>
+  ({
+    reference_id: normalizeText(tx.id || tx.referenceId),
+    occurred_on_text: normalizeText(tx.timestamp),
+    contract_no: normalizeText(tx.contract),
+    member_id: normalizeText(tx.memberId),
+    principal_paid: Number(tx.principalPaid) || 0,
+    interest_paid: Number(tx.interestPaid) || 0,
+    outstanding_balance: Number(tx.newBalance) || 0,
+    note: normalizeText(tx.note),
+    actor: normalizeText(tx.actor || tx.performedBy),
+    full_name: normalizeText(tx.memberName),
+    tx_status: normalizeText(tx.txStatus || tx.status),
+    interest_months_paid: Math.max(0, Number(tx.interestMonthsPaid) || 0),
+    overdue_interest_before:
+      Number(tx.currentMissedInterestMonths || tx.overdueInterestBefore) || 0,
+    overdue_interest_after:
+      Number(tx.newMissedInterestMonths || tx.overdueInterestAfter) || 0,
+    raw_json: tx as JsonObject,
+    updated_at: new Date().toISOString(),
+    imported_at: new Date().toISOString(),
+  }) as JsonObject;
+
+const setupDatabase = async (payload: RpcPayload) => {
+  const { session } = await resolveSession(payload);
+  requirePermission(session, "settings.manage", "ไม่มีสิทธิ์ตั้งค่าฐานข้อมูลอัตโนมัติ");
+
+  const rawArg = payload.args?.[0];
+  const setupPayload = typeof rawArg === "string"
+    ? normalizeSettingsInputObject(JSON.parse(rawArg || "{}"))
+    : normalizeSettingsInputObject(rawArg);
+
+  const importedLoans = Array.isArray(setupPayload.loans)
+    ? (setupPayload.loans as Array<Record<string, unknown>>)
+      .map(normalizeImportedLoanRow)
+      .filter((row) => normalizeText(row.contract_no))
+    : [];
+  const importedMembers = Array.isArray(setupPayload.members)
+    ? (setupPayload.members as Array<Record<string, unknown>>)
+      .map(normalizeImportedMemberRow)
+      .filter((row) => normalizeText(row.member_id))
+    : [];
+  const importedTransactions = Array.isArray(setupPayload.transactions)
+    ? (setupPayload.transactions as Array<Record<string, unknown>>)
+      .map(normalizeImportedTransactionRow)
+      .filter((row) => normalizeText(row.reference_id))
+    : [];
+  const importedUsers = Array.isArray(setupPayload.users)
+    ? (setupPayload.users as Array<Record<string, unknown>>)
+      .map(normalizeImportedUserRow)
+      .filter((row) =>
+        normalizeText(row.user_id) && normalizeText(row.username)
+      )
+    : [];
+  const importedAuditLogs = Array.isArray(setupPayload.auditLogs)
+    ? (setupPayload.auditLogs as Array<Record<string, unknown>>)
+      .map(normalizeImportedAuditLogRow)
+      .filter((row) =>
+        normalizeText(row.action) || normalizeText(row.details) ||
+        normalizeText(row.occurred_at_text)
+      )
+    : [];
+
+  const summary = {
+    loans: await upsertSupabaseBatch("loans", importedLoans, ["contract_no"]),
+    members: await upsertSupabaseBatch("members", importedMembers, [
+      "member_id",
+    ]),
+    transactions: await upsertSupabaseBatch(
+      "transactions",
+      importedTransactions,
+      ["reference_id"],
+    ),
+    users: await upsertSupabaseBatch("app_users", importedUsers, ["user_id"]),
+    auditLogs: await insertSupabaseBatch("audit_logs", importedAuditLogs),
+  };
+
+  await appendAuditLogEntry(session, {
+    action: "SETUP_DATABASE",
+    entityType: "SYSTEM",
+    entityId: "Supabase",
+    referenceNo: "Supabase",
+    after: summary,
+    details: "Backfill ข้อมูลจาก Sheets/GAS ไป Supabase ผ่าน Edge Function สำเร็จ",
+  });
+
+  return {
+    message: "ย้ายข้อมูลไป Supabase เรียบร้อยแล้ว",
+    provider: "supabase",
+    ...summary,
+    tables: getSupabaseManagedTableNames(),
+    missingTables: [],
+  } as JsonObject;
+};
+
+const appendAuditLogEntry = async (
+  session: SessionData,
+  payload: {
+    action: string;
+    entityType: string;
+    entityId?: string;
+    referenceNo?: string;
+    before?: JsonValue;
+    after?: JsonValue;
+    reason?: string;
+    details?: string;
+  },
+) => {
+  await insertSupabaseBatch("audit_logs", [{
+    occurred_at_text: formatThaiDateTime(new Date()),
+    username: normalizeText(session.username),
+    display_name: normalizeText(session.fullName || session.username),
+    role: normalizeRole(session.role),
+    action: normalizeText(payload.action),
+    entity_type: normalizeText(payload.entityType),
+    entity_id: normalizeText(payload.entityId),
+    reference_no: normalizeText(payload.referenceNo),
+    before_json: payload.before === undefined
+      ? ""
+      : JSON.stringify(payload.before),
+    after_json: payload.after === undefined
+      ? ""
+      : JSON.stringify(payload.after),
+    reason: normalizeText(payload.reason),
+    details: normalizeText(payload.details),
+    raw_json: payload as unknown as JsonObject,
+    imported_at: new Date().toISOString(),
+  }]);
 };
 
 const insertSupabaseRows = async (
@@ -1109,7 +1376,7 @@ const findUserByLoginPin = async (pinValue: unknown) => {
   const candidateRows = await callSupabase("app_users", {
     select:
       "user_id,username,full_name,email,role,status,email_verified_at_text,pin_hash,pin_unique_key,permissions_json,last_login_at_text,updated_at_text",
-    not: "pin_hash.is.null",
+    pin_hash: "not.is.null",
     limit: "5000",
   });
   let matchedUser: SupabaseRow | null = null;
@@ -2341,6 +2608,22 @@ const savePayment = async (payload: RpcPayload) => {
     overdue_months: newMissedInterestMonths,
   });
 
+  await appendAuditLogEntry(session, {
+    action: "SAVE_PAYMENT",
+    entityType: "TRANSACTION",
+    entityId: txId,
+    referenceNo: contractNo,
+    after: {
+      transactionId: txId,
+      contract: contractNo,
+      principalPaid,
+      interestPaid,
+      newBalance,
+      status: serverStatus,
+    },
+    details: `บันทึกรับชำระสัญญา ${contractNo}`,
+  });
+
   return buildSavePaymentResponse(
     txId,
     timestamp,
@@ -2446,6 +2729,21 @@ const cancelPayment = async (payload: RpcPayload) => {
     overdue_months: finalMissedInterestMonths,
   });
 
+  await appendAuditLogEntry(session, {
+    action: "REVERSE_PAYMENT",
+    entityType: "TRANSACTION",
+    entityId: normalizedTransactionId,
+    referenceNo: reversalTransactionId,
+    reason: normalizedReason,
+    after: {
+      contract: contractNo,
+      reversalTransactionId,
+      finalBalance,
+      finalStatus,
+    },
+    details: `กลับรายการรับชำระสัญญา ${contractNo}`,
+  });
+
   return {
     message: "ลบรายการรับชำระเรียบร้อยแล้ว และคืนยอดสัญญาอัตโนมัติ",
     transactionId: normalizedTransactionId,
@@ -2493,6 +2791,14 @@ const addMember = async (payload: RpcPayload) => {
   }
 
   await upsertMemberRow(member);
+  await appendAuditLogEntry(session, {
+    action: "ADD_MEMBER",
+    entityType: "MEMBER",
+    entityId: member.id,
+    referenceNo: member.id,
+    after: member as unknown as JsonObject,
+    details: `เพิ่มสมาชิก ${member.id}`,
+  });
   return {
     action: "createdMember",
     member,
@@ -2537,6 +2843,14 @@ const updateMember = async (payload: RpcPayload) => {
     previousMemberName,
     member.name,
   );
+  await appendAuditLogEntry(session, {
+    action: "UPDATE_MEMBER",
+    entityType: "MEMBER",
+    entityId: member.id,
+    referenceNo: member.id,
+    after: member as unknown as JsonObject,
+    details: `แก้ไขสมาชิก ${member.id}`,
+  });
   return { ok: true } as JsonObject;
 };
 
@@ -2572,6 +2886,15 @@ const addLoan = async (payload: RpcPayload) => {
     missedInterestMonths: 0,
     guarantor1: normalizedGuarantors.guarantor1 || "",
     guarantor2: normalizedGuarantors.guarantor2 || "",
+  });
+
+  await appendAuditLogEntry(session, {
+    action: "ADD_LOAN",
+    entityType: "LOAN",
+    entityId: loanData.contract,
+    referenceNo: loanData.contract,
+    after: loanData as unknown as JsonObject,
+    details: `เพิ่มสัญญา ${loanData.contract}`,
   });
 
   return {
@@ -2629,6 +2952,14 @@ const editLoan = async (payload: RpcPayload) => {
   });
 
   await syncMemberRegisterFromLoanEdit(loanData.memberId, loanData.member);
+  await appendAuditLogEntry(session, {
+    action: "EDIT_LOAN",
+    entityType: "LOAN",
+    entityId: loanData.contract,
+    referenceNo: loanData.contract,
+    after: loanData as unknown as JsonObject,
+    details: `แก้ไขสัญญา ${loanData.contract}`,
+  });
 
   return {
     message: "แก้ไขข้อมูลสัญญาเรียบร้อยแล้ว",
@@ -2677,6 +3008,15 @@ const updateLoanStatus = async (payload: RpcPayload) => {
     },
   });
 
+  await appendAuditLogEntry(session, {
+    action: "UPDATE_LOAN_STATUS",
+    entityType: "LOAN",
+    entityId: contractNo,
+    referenceNo: contractNo,
+    after: { status },
+    details: `อัปเดตสถานะสัญญา ${contractNo}`,
+  });
+
   return {
     message: "อัปเดตสถานะสัญญาเรียบร้อยแล้ว",
     contract: contractNo,
@@ -2701,6 +3041,13 @@ const deleteLoan = async (payload: RpcPayload) => {
   }
 
   await deleteSupabaseRows("loans", { contract_no: `eq.${contractNo}` });
+  await appendAuditLogEntry(session, {
+    action: "DELETE_LOAN",
+    entityType: "LOAN",
+    entityId: contractNo,
+    referenceNo: contractNo,
+    details: `ลบสัญญา ${contractNo}`,
+  });
   return {
     message: "ลบข้อมูลสัญญาสำเร็จ",
     contract: contractNo,
@@ -2945,6 +3292,15 @@ const saveSettings = async (payload: RpcPayload) => {
     await upsertAppSettingValues(updates);
   }
 
+  await appendAuditLogEntry(session, {
+    action: "SAVE_SETTINGS",
+    entityType: "SETTING",
+    entityId: "app_settings",
+    referenceNo: "app_settings",
+    after: updates as unknown as JsonObject,
+    details: "บันทึกการตั้งค่าระบบ",
+  });
+
   const response: JsonObject = {
     message: "บันทึกการตั้งค่าเรียบร้อยแล้ว",
   };
@@ -3161,6 +3517,26 @@ const handlers: Record<string, (payload: RpcPayload) => Promise<Response>> = {
       return appError(
         (error as Error)?.message || "โหลดการตั้งค่าการแจ้งเตือนไม่สำเร็จ",
         "GET_NOTIFICATION_SETTINGS_FAILED",
+      );
+    }
+  },
+  async getSupabaseSetupStatus(payload) {
+    try {
+      return success(await getSupabaseSetupStatus(payload));
+    } catch (error) {
+      return appError(
+        (error as Error)?.message || "โหลดสถานะ Supabase setup ไม่สำเร็จ",
+        "GET_SUPABASE_SETUP_STATUS_FAILED",
+      );
+    }
+  },
+  async setupDatabase(payload) {
+    try {
+      return success(await setupDatabase(payload));
+    } catch (error) {
+      return appError(
+        (error as Error)?.message || "ตั้งค่าฐานข้อมูลไม่สำเร็จ",
+        "SETUP_DATABASE_FAILED",
       );
     }
   },
