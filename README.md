@@ -17,6 +17,7 @@ Supabase project เริ่มต้นที่ตั้งไว้ในร
 
 - หน้าเว็บหลักอยู่ที่ [index.html](index.html)
 - GitHub Pages deploy อัตโนมัติผ่าน [workflow pages](.github/workflows/pages.yml)
+- Supabase Edge Functions deploy อัตโนมัติผ่าน [workflow supabase-functions](.github/workflows/supabase-functions.yml)
 - ฝั่ง backend อยู่ที่ [Code.gs](Code.gs)
 - scaffold สำหรับ Supabase backend อยู่ที่ [supabase/functions/app-api/index.ts](supabase/functions/app-api/index.ts)
 - runbook การย้ายระบบอยู่ที่ [docs/supabase-backend-migration.md](docs/supabase-backend-migration.md)
@@ -25,6 +26,7 @@ Supabase project เริ่มต้นที่ตั้งไว้ในร
 ## วิธีทำงาน
 
 - เมื่อ push ขึ้น branch `main` GitHub Actions จะ deploy หน้าเว็บไปยัง GitHub Pages อัตโนมัติ
+- เมื่อ push ขึ้น branch `main` และมีการเปลี่ยนแปลงในโฟลเดอร์ `supabase/` GitHub Actions จะ deploy เฉพาะ Edge Function ที่มีไฟล์เปลี่ยนจริงไปยัง Supabase อัตโนมัติ
 - หน้าเว็บจะเรียก backend ผ่าน transport layer กลางใน [index.html](index.html)
 - ค่า default ของ backend ใหม่ถูกกำหนดไว้ในตัวแปร `window.__BACKEND_API_URL__` ภายใน [index.html](index.html)
 - ยังเก็บ `window.__GAS_WEB_APP_URL__` ไว้เป็น fallback/compatibility สำหรับช่วง migration
@@ -41,7 +43,22 @@ Supabase project เริ่มต้นที่ตั้งไว้ในร
 - หาก GitHub Pages ยังไม่ขึ้นทันที ให้รอ workflow deploy ทำงานให้เสร็จก่อน
 - หาก backend ใหม่ยังไม่ implement method ครบ หน้าเว็บจะเรียกได้เฉพาะ route ที่ Edge Function รองรับแล้ว
 - หากต้องการใช้งานต่อในช่วงเปลี่ยนผ่าน ยังสามารถชี้กลับไปยัง GAS fallback ได้
+- การกลับรายการรับชำระบน Supabase Edge Function รอบนี้รองรับเฉพาะรายการล่าสุดของสัญญา
+- การเพิ่มสมาชิกสามารถอัปเกรด `ผู้ค้ำชั่วคราว` เป็นสมาชิกจริงได้เมื่อพบชื่อที่ตรงกันเพียงรายการเดียว
 
 ## Deploy Supabase Edge Function
 
 ใช้คู่มือพร้อมคำสั่งจริงที่ [docs/supabase-edge-function-deploy.md](docs/supabase-edge-function-deploy.md)
+
+## Auto Deploy Supabase
+
+repo นี้มี workflow สำหรับ deploy `app-api` และ `hello-world` อัตโนมัติที่ [workflow supabase-functions](.github/workflows/supabase-functions.yml) โดยจะ deploy เฉพาะ function ที่มีไฟล์เปลี่ยนใน push นั้น
+
+ก่อนใช้งาน ต้องตั้งค่า GitHub repository secrets ต่อไปนี้:
+
+- `SUPABASE_ACCESS_TOKEN`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `APP_SESSION_SIGNING_SECRET`
+- `PIN_UNIQUE_PEPPER`
+- `APP_LOGIN_REQUIRED`

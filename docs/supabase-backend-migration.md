@@ -26,6 +26,7 @@
 - `getPaymentLookupByMemberId`
 - `getTodayTransactionsForMemberPaymentEdit`
 - `getSessionSnapshot`
+- `getNotificationSettings`
 
 ชุด write หลัก:
 
@@ -48,6 +49,15 @@
 6. ย้าย reports/workflow/admin methods ที่เหลือ
 7. ปิด fallback ไป GAS และลบ `window.__GAS_WEB_APP_URL__` ออกจากหน้าเว็บ
 
+สถานะล่าสุด:
+
+- `verifyLoginPin`, `savePayment`, `cancelPayment`, `addMember`, `updateMember`, `addLoan`, `editLoan`, `getNotificationSettings`, `saveSettings` ถูกย้ายมารอบแรกแล้วใน Edge Function
+- `cancelPayment` ยังจำกัดที่การกลับรายการล่าสุดของสัญญา เพื่อหลีกเลี่ยงยอดเพี้ยนก่อนย้าย engine คำนวณย้อนหลังครบ
+- `addMember` รองรับการอัปเกรด `ผู้ค้ำชั่วคราว` เป็นสมาชิกจริงเมื่อจับคู่ชื่อได้ชัดเจนเพียงรายการเดียว
+- `saveSettings` รองรับ `interestRate`, `notificationSettings`, `reportLayoutSettings`, `menuSettings` โดยเขียนลง `app_settings`
+- สิทธิ์ `notifications.manage` ถูกเปิดใช้ใน Edge Function แล้ว และจะอ่านจาก `permissions_json` ของ `app_users`
+- `addLoan` และ `editLoan` รองรับการสร้างผู้ค้ำชั่วคราวอัตโนมัติ และ sync ชื่อผู้กู้กลับไปยังทะเบียนสมาชิกเมื่อแก้ชื่อผู้กู้ในสัญญา
+
 ## แนวทาง implementation ฝั่ง Supabase
 
 ### Edge Function
@@ -68,6 +78,7 @@
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `APP_SESSION_SIGNING_SECRET`
+- `PIN_UNIQUE_PEPPER`
 - `APP_LOGIN_REQUIRED`
 
 ## Deploy ใช้งานจริง
