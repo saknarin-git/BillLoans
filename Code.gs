@@ -7614,6 +7614,35 @@ function callSupabaseRestApi_(config, method, tableName, queryParams, payload, e
   return callJsonApi_(endpoint, options);
 }
 
+function buildSupabaseEdgeFunctionUrl_(config) {
+  var resolved = getSupabaseConfig_(config);
+  var projectRef = String(resolved.projectRef || '').trim();
+  if (!projectRef) {
+    var normalizedUrl = normalizeSupabaseUrl_(resolved.url);
+    try {
+      projectRef = normalizedUrl.replace(/^https?:\/\//i, '').split('.')[0] || '';
+    } catch (e) {
+      projectRef = '';
+    }
+  }
+  if (!projectRef) throw new Error('ไม่พบ project ref สำหรับเรียก Supabase Edge Function');
+  return 'https://' + projectRef + '.functions.supabase.co/app-api';
+}
+
+function callSupabaseEdgeRpc_(config, methodName, args, sessionToken) {
+  var endpoint = buildSupabaseEdgeFunctionUrl_(config);
+  return callJsonApi_(endpoint, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({
+      method: String(methodName || '').trim(),
+      args: Array.isArray(args) ? args : [],
+      sessionToken: String(sessionToken || '').trim()
+    }),
+    errorPrefix: 'Supabase Edge Function error'
+  });
+}
+
 function extractSupabaseQueryRows_(result) {
   if (Array.isArray(result)) return result;
   if (result && Array.isArray(result.result)) return result.result;
@@ -8131,19 +8160,48 @@ function setupSupabaseDatabase_(config, seedPayload) {
   }
 
   var resolved = saveSupabaseConfig_(validation.config, 'supabase');
-  callSupabaseManagementQuery_(resolved, buildSupabaseSchemaSql_(resolved.schema), false);
-
   var spreadsheet = getDatabaseSpreadsheet_();
   var seedData = collectSupabaseSeedData_(spreadsheet, seedPayload);
 
+  var edgePayload = {
+    provider: 'supabase',
+    config: {
+      url: resolved.url,
+      projectRef: resolved.projectRef,
+      schema: resolved.schema,
+      managementToken: resolved.managementToken
+    },
+    loans: seedData.loans,
+    members: seedData.members,
+    transactions: seedData.transactions,
+    settingsMap: (function(rows) {
+      var map = {};
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i] || {};
+        var key = String(row.key || '').trim();
+        if (!key) continue;
+        if (row.value_json !== null && row.value_json !== undefined && row.value_json !== '') map[key] = row.value_json;
+        else map[key] = row.value_text;
+      }
+      return map;
+    })(seedData.settings),
+    users: seedData.users,
+    auditLogs: seedData.auditLogs,
+    counters: seedData.counters
+  };
+  var edgeResult = callSupabaseEdgeRpc_(resolved, 'setupDatabase', [JSON.stringify(edgePayload)], '');
+  if (edgeResult && edgeResult.status === 'Error') {
+    throw new Error(edgeResult.message || 'Supabase Edge Function setupDatabase ไม่สำเร็จ');
+  }
+
   var imported = {
-    loans: upsertSupabaseRowsInBatches_(resolved, 'loans', seedData.loans, ['contract_no'], 250),
-    members: upsertSupabaseRowsInBatches_(resolved, 'members', seedData.members, ['member_id'], 250),
-    transactions: upsertSupabaseRowsInBatches_(resolved, 'transactions', seedData.transactions, ['reference_id'], 250),
-    settings: upsertSupabaseRowsInBatches_(resolved, 'app_settings', seedData.settings, ['key'], 250),
-    users: upsertSupabaseRowsInBatches_(resolved, 'app_users', seedData.users, ['user_id'], 250),
-    auditLogs: upsertSupabaseRowsInBatches_(resolved, 'audit_logs', seedData.auditLogs, '', 250),
-    counters: upsertSupabaseRowsInBatches_(resolved, 'app_counters', seedData.counters, ['counter_key'], 250)
+    loans: Number(edgeResult && edgeResult.loans) || 0,
+    members: Number(edgeResult && edgeResult.members) || 0,
+    transactions: Number(edgeResult && edgeResult.transactions) || 0,
+    settings: Number(edgeResult && edgeResult.settings) || 0,
+    users: Number(edgeResult && edgeResult.users) || 0,
+    auditLogs: Number(edgeResult && edgeResult.auditLogs) || 0,
+    counters: Number(edgeResult && edgeResult.counters) || 0
   };
 
   var schemaStatus = inspectSupabaseSchemaStatus_(resolved);
@@ -8161,7 +8219,7 @@ function setupSupabaseDatabase_(config, seedPayload) {
     imported: imported,
     tables: schemaStatus.tables,
     missingTables: schemaStatus.missingTables,
-    message: 'สร้างโครงสร้าง Supabase และนำเข้าข้อมูลหลักเรียบร้อยแล้ว'
+    message: (edgeResult && edgeResult.message) || 'สร้างโครงสร้าง Supabase และนำเข้าข้อมูลหลักเรียบร้อยแล้ว'
   };
 }
 

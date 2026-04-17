@@ -7967,13 +7967,9 @@ const getQuickOverviewToneClass = (tone) => {
         setSupabaseSetupStatus({ type: "error", message: "บัญชีนี้ไม่มีสิทธิ์ตรวจสอบการตั้งค่า Supabase", ready: false, tables: [], missingTables: [], config: null });
         return;
       }
-      if (!(typeof google !== "undefined" && google.script && google.script.run)) {
-        setSupabaseSetupStatus({ type: "error", message: "ไม่สามารถเชื่อมต่อบริการ Google Apps Script เพื่อทดสอบ Supabase ได้", ready: false, tables: [], missingTables: [], config: null });
-        return;
-      }
       setSupabaseSetupLoading(true);
       setSupabaseSetupStatus((prev) => ({ ...prev, type: "loading", message: "กำลังตรวจสอบการเชื่อมต่อ Supabase..." }));
-      google.script.run.withSuccessHandler((response) => {
+      callBackend("getSupabaseSetupStatus", JSON.stringify(supabaseSetupConfig)).then((response) => {
         const result = parseBackendResponse(response);
         const backendConfig = result && result.config ? result.config : {};
         setSupabaseSetupStatus({
@@ -7986,13 +7982,13 @@ const getQuickOverviewToneClass = (tone) => {
         });
         setSupabaseSetupLoaded(true);
         setSupabaseSetupLoading(false);
-      }).withFailureHandler((error) => {
+      }).catch((error) => {
         setSupabaseSetupStatus({ type: "error", message: "ตรวจสอบ Supabase ไม่สำเร็จ: " + (((error == null ? void 0 : error.message) || error || "ไม่ทราบสาเหตุ")), ready: false, tables: [], missingTables: [], config: null });
         setSupabaseSetupLoading(false);
-      }).getSupabaseSetupStatus(JSON.stringify(supabaseSetupConfig));
+      });
     };
 
-    const handleSetupDatabase = () => {
+    const handleSetupDatabase = async () => {
       if (!canManageSettings) {
         setSetupStatus("error");
         setSetupStatusMessage("บัญชีนี้ไม่มีสิทธิ์ตั้งค่าฐานข้อมูล");
@@ -8000,40 +7996,72 @@ const getQuickOverviewToneClass = (tone) => {
       }
       setSetupStatus("loading");
       setSetupStatusMessage("กำลังสร้างโครงสร้างและย้ายข้อมูลไป Supabase...");
-      const exportData = { provider: "supabase", config: supabaseSetupConfig, loans, members };
-      if (typeof google !== "undefined" && google.script && google.script.run) {
-        google.script.run.withSuccessHandler((response) => {
-          const result = parseBackendResponse(response);
-          if (!result || result.status === "Error") {
-            setSetupStatus("error");
-            setSetupStatusMessage((result == null ? void 0 : result.message) || "ตั้งค่าฐานข้อมูลไม่สำเร็จ");
-            return;
-          }
-          setSetupStatus("success");
-          setSetupStatusMessage((result == null ? void 0 : result.message) || "สร้างฐานข้อมูลบน Supabase เรียบร้อยแล้ว");
-          setSupabaseSetupStatus((prev) => ({
-            ...prev,
-            type: "success",
-            message: (result == null ? void 0 : result.message) || "สร้างฐานข้อมูลบน Supabase เรียบร้อยแล้ว",
-            ready: !((result == null ? void 0 : result.missingTables) || []).length,
-            tables: Array.isArray(result == null ? void 0 : result.tables) ? result.tables : [],
-            missingTables: Array.isArray(result == null ? void 0 : result.missingTables) ? result.missingTables : []
-          }));
-          loadInitialData();
-          if (isActiveSettingsWorkspaceItem("auditLogs") && canViewAuditLogs && auditLogLoaded) {
-            loadAuditLogRows(true);
-          }
-          setTimeout(() => {
-            setSetupStatus("idle");
-            setSetupStatusMessage("");
-          }, 6e3);
-        }).withFailureHandler((error) => {
+      try {
+        const preloadTasks = [];
+        if (!userAdminLoaded && canManageUsers) {
+          preloadTasks.push(callBackend("getUserAdminList"));
+        } else {
+          preloadTasks.push(Promise.resolve(null));
+        }
+        if (!auditLogLoaded && canViewAuditLogs) {
+          preloadTasks.push(callBackend("getAuditLogs", JSON.stringify({ limit: 150 })));
+        } else {
+          preloadTasks.push(Promise.resolve(null));
+        }
+        if (!notificationSettingsLoaded && (canManageNotifications || canManageSettings)) {
+          preloadTasks.push(callBackend("getNotificationSettings"));
+        } else {
+          preloadTasks.push(Promise.resolve(null));
+        }
+        const preloadResults = await Promise.allSettled(preloadTasks);
+        const userResponse = preloadResults[0] && preloadResults[0].status === "fulfilled" ? preloadResults[0].value : null;
+        const auditResponse = preloadResults[1] && preloadResults[1].status === "fulfilled" ? preloadResults[1].value : null;
+        const notificationResponse = preloadResults[2] && preloadResults[2].status === "fulfilled" ? preloadResults[2].value : null;
+        const parsedUsers = userResponse ? parseBackendResponse(userResponse) : null;
+        const parsedAuditLogs = auditResponse ? parseBackendResponse(auditResponse) : null;
+        const parsedNotificationSettings = notificationResponse ? parseBackendResponse(notificationResponse) : null;
+        const exportData = {
+          provider: "supabase",
+          config: supabaseSetupConfig,
+          loans,
+          members,
+          transactions: recentTransactions,
+          users: Array.isArray(parsedUsers == null ? void 0 : parsedUsers.users) ? parsedUsers.users : userAdminRows,
+          auditLogs: Array.isArray(parsedAuditLogs == null ? void 0 : parsedAuditLogs.records) ? parsedAuditLogs.records : auditLogRows,
+          interestRate,
+          notificationSettings: (parsedNotificationSettings == null ? void 0 : parsedNotificationSettings.settings) || notificationSettings,
+          operatingDayCalendar,
+          reportLayoutSettings,
+          menuSettings
+        };
+        const response = await callBackend("setupDatabase", JSON.stringify(exportData));
+        const result = parseBackendResponse(response);
+        if (!result || result.status === "Error") {
           setSetupStatus("error");
-          setSetupStatusMessage("ตั้งค่าฐานข้อมูลไม่สำเร็จ: " + (((error == null ? void 0 : error.message) || error || "ไม่ทราบสาเหตุ")));
-        }).setupDatabase(JSON.stringify(exportData));
-      } else {
+          setSetupStatusMessage((result == null ? void 0 : result.message) || "ตั้งค่าฐานข้อมูลไม่สำเร็จ");
+          return;
+        }
+        setSetupStatus("success");
+        setSetupStatusMessage((result == null ? void 0 : result.message) || "สร้างฐานข้อมูลบน Supabase เรียบร้อยแล้ว");
+        setSupabaseSetupStatus((prev) => ({
+          ...prev,
+          type: "success",
+          message: (result == null ? void 0 : result.message) || "สร้างฐานข้อมูลบน Supabase เรียบร้อยแล้ว",
+          ready: !((result == null ? void 0 : result.missingTables) || []).length,
+          tables: Array.isArray(result == null ? void 0 : result.tables) ? result.tables : [],
+          missingTables: Array.isArray(result == null ? void 0 : result.missingTables) ? result.missingTables : []
+        }));
+        loadInitialData();
+        if (isActiveSettingsWorkspaceItem("auditLogs") && canViewAuditLogs) {
+          loadAuditLogRows(true);
+        }
+        setTimeout(() => {
+          setSetupStatus("idle");
+          setSetupStatusMessage("");
+        }, 6e3);
+      } catch (error) {
         setSetupStatus("error");
-        setSetupStatusMessage("ไม่สามารถเชื่อมต่อบริการ Google Apps Script เพื่อตั้งค่า Supabase ได้");
+        setSetupStatusMessage("ตั้งค่าฐานข้อมูลไม่สำเร็จ: " + (((error == null ? void 0 : error.message) || error || "ไม่ทราบสาเหตุ")));
       }
     };
 

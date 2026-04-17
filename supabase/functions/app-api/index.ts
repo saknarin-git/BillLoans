@@ -862,7 +862,7 @@ const callSupabaseRequest = async (
   method: string,
   tableName: string,
   query: Record<string, string>,
-  payload?: JsonValue,
+  payload?: JsonObject,
   extraHeaders: Record<string, string> = {},
 ): Promise<SupabaseRow[]> => {
   const { supabaseUrl, serviceRoleKey } = ensureConfigured();
@@ -910,274 +910,6 @@ const deleteSupabaseRows = async (
   await callSupabaseRequest("DELETE", tableName, query, undefined, {
     Prefer: "return=minimal",
   });
-};
-
-const upsertSupabaseBatch = async (
-  tableName: string,
-  rows: JsonObject[],
-  onConflictColumns: string[] = [],
-) => {
-  if (!rows.length) return 0;
-  const query: Record<string, string> = {};
-  if (onConflictColumns.length) {
-    query.on_conflict = onConflictColumns.join(",");
-  }
-  await callSupabaseRequest("POST", tableName, query, rows, {
-    Prefer: "resolution=merge-duplicates,return=minimal",
-  });
-  return rows.length;
-};
-
-const insertSupabaseBatch = async (tableName: string, rows: JsonObject[]) => {
-  if (!rows.length) return 0;
-  await callSupabaseRequest("POST", tableName, {}, rows, {
-    Prefer: "return=minimal",
-  });
-  return rows.length;
-};
-
-const getSupabaseManagedTableNames = () => [
-  "loans",
-  "members",
-  "transactions",
-  "app_settings",
-  "app_users",
-  "audit_logs",
-  "app_counters",
-];
-
-const getSupabaseSetupStatus = async (payload: RpcPayload) => {
-  const { session } = await resolveSession(payload);
-  requirePermission(session, "settings.manage", "ไม่มีสิทธิ์ดูการตั้งค่า Supabase");
-
-  const counts: Record<string, number> = {};
-  for (const tableName of getSupabaseManagedTableNames()) {
-    const rows = await callSupabase(tableName, {
-      select: "*",
-      limit: "1",
-    });
-    counts[tableName] = rows.length;
-  }
-
-  return {
-    provider: "supabase",
-    ready: true,
-    tables: getSupabaseManagedTableNames(),
-    missingTables: [],
-    counts,
-    message: "Supabase Edge Function เชื่อมต่อฐานข้อมูลได้และพบตารางหลักครบแล้ว",
-  } as JsonObject;
-};
-
-const normalizeImportedUserRow = (user: Record<string, unknown>) => {
-  const nowIso = new Date().toISOString();
-  return {
-    user_id: normalizeText(user.userId) || crypto.randomUUID(),
-    username: normalizeLower(user.username),
-    full_name: normalizeText(user.fullName),
-    email: normalizeLower(user.email),
-    password_hash: "",
-    role: normalizeRole(user.role),
-    status: normalizeUserStatus(user.status),
-    created_at_text: normalizeText(user.createdAt),
-    updated_at_text: normalizeText(user.updatedAt) ||
-      formatThaiDateTime(new Date()),
-    last_login_at_text: normalizeText(user.lastLoginAt),
-    reset_otp_hash: "",
-    reset_otp_expire_at_text: "",
-    reset_otp_requested_at_text: "",
-    reset_otp_used_at_text: "",
-    permissions_json: normalizeText(user.permissionsJson),
-    prefix: normalizeText(user.prefix),
-    first_name: normalizeText(user.firstName),
-    last_name: normalizeText(user.lastName),
-    email_verified_at_text: normalizeText(user.emailVerifiedAt),
-    pin_hash: normalizeText(user.pinHash),
-    pin_unique_key: normalizeText(user.pinUniqueKey),
-    pin_updated_at_text: normalizeText(user.pinUpdatedAt),
-    email_verify_otp_hash: "",
-    email_verify_otp_expire_at_text: "",
-    email_verify_otp_requested_at_text: "",
-    raw_json: user as JsonObject,
-    imported_at: nowIso,
-  } as JsonObject;
-};
-
-const normalizeImportedAuditLogRow = (record: Record<string, unknown>) =>
-  ({
-    occurred_at_text: normalizeText(record.timestamp),
-    username: normalizeText(record.username),
-    display_name: normalizeText(record.actorName),
-    role: normalizeText(record.role),
-    action: normalizeText(record.action),
-    entity_type: normalizeText(record.entityType),
-    entity_id: normalizeText(record.entityId),
-    reference_no: normalizeText(record.referenceNo),
-    before_json: normalizeText(record.beforeJson),
-    after_json: normalizeText(record.afterJson),
-    reason: normalizeText(record.reason),
-    details: normalizeText(record.details),
-    raw_json: record as JsonObject,
-    imported_at: new Date().toISOString(),
-  }) as JsonObject;
-
-const normalizeImportedMemberRow = (member: Record<string, unknown>) =>
-  ({
-    member_id: normalizeText(member.id),
-    full_name: normalizeText(member.name),
-    status: normalizeText(member.status),
-    raw_json: member as JsonObject,
-    updated_at: new Date().toISOString(),
-    imported_at: new Date().toISOString(),
-  }) as JsonObject;
-
-const normalizeImportedLoanRow = (loan: Record<string, unknown>) =>
-  ({
-    contract_no: normalizeText(loan.contract),
-    member_id: normalizeText(loan.memberId),
-    borrower_name: normalizeText(loan.member),
-    principal_amount: Number(loan.amount) || 0,
-    interest_rate: Number(loan.interest) || 0,
-    outstanding_balance: Number(loan.balance) || 0,
-    status: normalizeText(loan.status),
-    due_date_text: normalizeText(loan.nextPayment),
-    overdue_months: Math.max(0, Number(loan.missedInterestMonths) || 0),
-    created_date_text: normalizeLoanCreatedAt(loan.createdAt),
-    guarantor_1: normalizeText(loan.guarantor1),
-    guarantor_2: normalizeText(loan.guarantor2),
-    raw_json: loan as JsonObject,
-    updated_at: new Date().toISOString(),
-    imported_at: new Date().toISOString(),
-  }) as JsonObject;
-
-const normalizeImportedTransactionRow = (tx: Record<string, unknown>) =>
-  ({
-    reference_id: normalizeText(tx.id || tx.referenceId),
-    occurred_on_text: normalizeText(tx.timestamp),
-    contract_no: normalizeText(tx.contract),
-    member_id: normalizeText(tx.memberId),
-    principal_paid: Number(tx.principalPaid) || 0,
-    interest_paid: Number(tx.interestPaid) || 0,
-    outstanding_balance: Number(tx.newBalance) || 0,
-    note: normalizeText(tx.note),
-    actor: normalizeText(tx.actor || tx.performedBy),
-    full_name: normalizeText(tx.memberName),
-    tx_status: normalizeText(tx.txStatus || tx.status),
-    interest_months_paid: Math.max(0, Number(tx.interestMonthsPaid) || 0),
-    overdue_interest_before:
-      Number(tx.currentMissedInterestMonths || tx.overdueInterestBefore) || 0,
-    overdue_interest_after:
-      Number(tx.newMissedInterestMonths || tx.overdueInterestAfter) || 0,
-    raw_json: tx as JsonObject,
-    updated_at: new Date().toISOString(),
-    imported_at: new Date().toISOString(),
-  }) as JsonObject;
-
-const setupDatabase = async (payload: RpcPayload) => {
-  const { session } = await resolveSession(payload);
-  requirePermission(session, "settings.manage", "ไม่มีสิทธิ์ตั้งค่าฐานข้อมูลอัตโนมัติ");
-
-  const rawArg = payload.args?.[0];
-  const setupPayload = typeof rawArg === "string"
-    ? normalizeSettingsInputObject(JSON.parse(rawArg || "{}"))
-    : normalizeSettingsInputObject(rawArg);
-
-  const importedLoans = Array.isArray(setupPayload.loans)
-    ? (setupPayload.loans as Array<Record<string, unknown>>)
-      .map(normalizeImportedLoanRow)
-      .filter((row) => normalizeText(row.contract_no))
-    : [];
-  const importedMembers = Array.isArray(setupPayload.members)
-    ? (setupPayload.members as Array<Record<string, unknown>>)
-      .map(normalizeImportedMemberRow)
-      .filter((row) => normalizeText(row.member_id))
-    : [];
-  const importedTransactions = Array.isArray(setupPayload.transactions)
-    ? (setupPayload.transactions as Array<Record<string, unknown>>)
-      .map(normalizeImportedTransactionRow)
-      .filter((row) => normalizeText(row.reference_id))
-    : [];
-  const importedUsers = Array.isArray(setupPayload.users)
-    ? (setupPayload.users as Array<Record<string, unknown>>)
-      .map(normalizeImportedUserRow)
-      .filter((row) =>
-        normalizeText(row.user_id) && normalizeText(row.username)
-      )
-    : [];
-  const importedAuditLogs = Array.isArray(setupPayload.auditLogs)
-    ? (setupPayload.auditLogs as Array<Record<string, unknown>>)
-      .map(normalizeImportedAuditLogRow)
-      .filter((row) =>
-        normalizeText(row.action) || normalizeText(row.details) ||
-        normalizeText(row.occurred_at_text)
-      )
-    : [];
-
-  const summary = {
-    loans: await upsertSupabaseBatch("loans", importedLoans, ["contract_no"]),
-    members: await upsertSupabaseBatch("members", importedMembers, [
-      "member_id",
-    ]),
-    transactions: await upsertSupabaseBatch(
-      "transactions",
-      importedTransactions,
-      ["reference_id"],
-    ),
-    users: await upsertSupabaseBatch("app_users", importedUsers, ["user_id"]),
-    auditLogs: await insertSupabaseBatch("audit_logs", importedAuditLogs),
-  };
-
-  await appendAuditLogEntry(session, {
-    action: "SETUP_DATABASE",
-    entityType: "SYSTEM",
-    entityId: "Supabase",
-    referenceNo: "Supabase",
-    after: summary,
-    details: "Backfill ข้อมูลจาก Sheets/GAS ไป Supabase ผ่าน Edge Function สำเร็จ",
-  });
-
-  return {
-    message: "ย้ายข้อมูลไป Supabase เรียบร้อยแล้ว",
-    provider: "supabase",
-    ...summary,
-    tables: getSupabaseManagedTableNames(),
-    missingTables: [],
-  } as JsonObject;
-};
-
-const appendAuditLogEntry = async (
-  session: SessionData,
-  payload: {
-    action: string;
-    entityType: string;
-    entityId?: string;
-    referenceNo?: string;
-    before?: JsonValue;
-    after?: JsonValue;
-    reason?: string;
-    details?: string;
-  },
-) => {
-  await insertSupabaseBatch("audit_logs", [{
-    occurred_at_text: formatThaiDateTime(new Date()),
-    username: normalizeText(session.username),
-    display_name: normalizeText(session.fullName || session.username),
-    role: normalizeRole(session.role),
-    action: normalizeText(payload.action),
-    entity_type: normalizeText(payload.entityType),
-    entity_id: normalizeText(payload.entityId),
-    reference_no: normalizeText(payload.referenceNo),
-    before_json: payload.before === undefined
-      ? ""
-      : JSON.stringify(payload.before),
-    after_json: payload.after === undefined
-      ? ""
-      : JSON.stringify(payload.after),
-    reason: normalizeText(payload.reason),
-    details: normalizeText(payload.details),
-    raw_json: payload as unknown as JsonObject,
-    imported_at: new Date().toISOString(),
-  }]);
 };
 
 const insertSupabaseRows = async (
@@ -1280,6 +1012,877 @@ const normalizeSettingsInputObject = (
     return value as Record<string, unknown>;
   }
   return {};
+};
+
+const parseJsonObjectArg = (value: unknown): Record<string, unknown> => {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  const text = normalizeText(value);
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text);
+    return normalizeSettingsInputObject(parsed);
+  } catch (error) {
+    throw new Error(
+      `รูปแบบ JSON สำหรับ setup ไม่ถูกต้อง: ${
+        (error as Error)?.message || "invalid json"
+      }`,
+    );
+  }
+};
+
+const normalizeJsonPayloadValue = (value: unknown): JsonValue => {
+  if (
+    value === null || typeof value === "string" || typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => normalizeJsonPayloadValue(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+        normalizeText(key),
+        normalizeJsonPayloadValue(entry),
+      ]),
+    ) as JsonObject;
+  }
+  return normalizeText(value);
+};
+
+const buildMaskedSecret = (value: unknown) => {
+  const text = normalizeText(value);
+  if (!text) return "";
+  if (text.length <= 8) return `${text.slice(0, 2)}***${text.slice(-2)}`;
+  return `${text.slice(0, 4)}...${text.slice(-4)}`;
+};
+
+const deriveProjectRefFromUrl = (value: unknown) => {
+  const text = normalizeText(value);
+  if (!text) return "";
+  try {
+    const hostname = new URL(text).hostname;
+    return hostname.split(".")[0] || "";
+  } catch {
+    return "";
+  }
+};
+
+const createHashRecord = async (secret: unknown) => {
+  const normalizedSecret = normalizeText(secret);
+  if (!normalizedSecret) return "";
+  const iterations = 10000;
+  const salt = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
+  const digest = await buildStrongPasswordHash(
+    normalizedSecret,
+    salt,
+    iterations,
+  );
+  return `v2$${iterations}$${salt}$${digest}`;
+};
+
+const upsertSupabaseBatch = async (
+  tableName: string,
+  rows: JsonObject[],
+  onConflictColumns: string[] = [],
+) => {
+  if (!rows.length) return 0;
+  const query: Record<string, string> = {};
+  if (onConflictColumns.length) {
+    query.on_conflict = onConflictColumns.join(",");
+  }
+  await callSupabaseRequest(
+    "POST",
+    tableName,
+    query,
+    rows as unknown as JsonObject,
+    {
+      Prefer: "resolution=merge-duplicates,return=minimal",
+    },
+  );
+  return rows.length;
+};
+
+const insertSupabaseBatch = async (tableName: string, rows: JsonObject[]) => {
+  if (!rows.length) return 0;
+  await callSupabaseRequest(
+    "POST",
+    tableName,
+    {},
+    rows as unknown as JsonObject,
+    {
+      Prefer: "return=minimal",
+    },
+  );
+  return rows.length;
+};
+
+const getSupabaseManagedTableNames = () => [
+  "loans",
+  "members",
+  "transactions",
+  "app_settings",
+  "app_users",
+  "audit_logs",
+  "app_counters",
+];
+
+const inspectSupabaseManagedTables = async () => {
+  const found: string[] = [];
+  const missing: string[] = [];
+  for (const tableName of getSupabaseManagedTableNames()) {
+    try {
+      await callSupabase(tableName, {
+        select: "*",
+        limit: "1",
+      });
+      found.push(tableName);
+    } catch (error) {
+      const message = normalizeText((error as Error)?.message);
+      if (
+        message.includes("Could not find the table") ||
+        message.includes("relation") || message.includes("404")
+      ) {
+        missing.push(tableName);
+        continue;
+      }
+      throw error;
+    }
+  }
+  return {
+    tables: found,
+    missingTables: missing,
+    ready: missing.length === 0,
+  };
+};
+
+const buildSupabaseSchemaSql = (schemaName: string) => {
+  const schema = normalizeText(schemaName) || "public";
+  return [
+    `create schema if not exists "${schema}";`,
+    `create table if not exists "${schema}"."loans" (`,
+    "  contract_no text primary key,",
+    "  member_id text not null default '',",
+    "  borrower_name text not null default '',",
+    "  principal_amount numeric(14,2) not null default 0,",
+    "  interest_rate numeric(10,2) not null default 0,",
+    "  outstanding_balance numeric(14,2) not null default 0,",
+    "  status text not null default '',",
+    "  due_date_text text not null default '',",
+    "  overdue_months integer not null default 0,",
+    "  created_date_text text not null default '',",
+    "  guarantor_1 text not null default '',",
+    "  guarantor_2 text not null default '',",
+    "  raw_json jsonb not null default '{}'::jsonb,",
+    "  updated_at timestamptz not null default now(),",
+    "  imported_at timestamptz not null default now()",
+    ");",
+    `create table if not exists "${schema}"."members" (`,
+    "  member_id text primary key,",
+    "  full_name text not null default '',",
+    "  status text not null default '',",
+    "  raw_json jsonb not null default '{}'::jsonb,",
+    "  updated_at timestamptz not null default now(),",
+    "  imported_at timestamptz not null default now()",
+    ");",
+    `create table if not exists "${schema}"."transactions" (`,
+    "  reference_id text primary key,",
+    "  occurred_on_text text not null default '',",
+    "  contract_no text not null default '',",
+    "  member_id text not null default '',",
+    "  principal_paid numeric(14,2) not null default 0,",
+    "  interest_paid numeric(14,2) not null default 0,",
+    "  outstanding_balance numeric(14,2) not null default 0,",
+    "  note text not null default '',",
+    "  actor text not null default '',",
+    "  full_name text not null default '',",
+    "  tx_status text not null default '',",
+    "  interest_months_paid integer not null default 0,",
+    "  overdue_interest_before numeric(14,2) not null default 0,",
+    "  overdue_interest_after numeric(14,2) not null default 0,",
+    "  raw_json jsonb not null default '{}'::jsonb,",
+    "  updated_at timestamptz not null default now(),",
+    "  imported_at timestamptz not null default now()",
+    ");",
+    `create table if not exists "${schema}"."app_settings" (`,
+    "  key text primary key,",
+    "  value_text text not null default '',",
+    "  value_json jsonb,",
+    "  updated_at timestamptz not null default now()",
+    ");",
+    `create table if not exists "${schema}"."app_users" (`,
+    "  user_id text primary key,",
+    "  username text not null unique,",
+    "  full_name text not null default '',",
+    "  email text not null default '',",
+    "  password_hash text not null default '',",
+    "  role text not null default 'staff',",
+    "  status text not null default 'Active',",
+    "  created_at_text text not null default '',",
+    "  updated_at_text text not null default '',",
+    "  last_login_at_text text not null default '',",
+    "  reset_otp_hash text not null default '',",
+    "  reset_otp_expire_at_text text not null default '',",
+    "  reset_otp_requested_at_text text not null default '',",
+    "  reset_otp_used_at_text text not null default '',",
+    "  permissions_json text not null default '',",
+    "  prefix text not null default '',",
+    "  first_name text not null default '',",
+    "  last_name text not null default '',",
+    "  email_verified_at_text text not null default '',",
+    "  pin_hash text not null default '',",
+    "  pin_unique_key text not null default '',",
+    "  pin_updated_at_text text not null default '',",
+    "  email_verify_otp_hash text not null default '',",
+    "  email_verify_otp_expire_at_text text not null default '',",
+    "  email_verify_otp_requested_at_text text not null default '',",
+    "  raw_json jsonb not null default '{}'::jsonb,",
+    "  imported_at timestamptz not null default now()",
+    ");",
+    `create table if not exists "${schema}"."audit_logs" (`,
+    "  log_id bigint generated by default as identity primary key,",
+    "  occurred_at_text text not null default '',",
+    "  username text not null default '',",
+    "  display_name text not null default '',",
+    "  role text not null default '',",
+    "  action text not null default '',",
+    "  entity_type text not null default '',",
+    "  entity_id text not null default '',",
+    "  reference_no text not null default '',",
+    "  before_json text not null default '',",
+    "  after_json text not null default '',",
+    "  reason text not null default '',",
+    "  details text not null default '',",
+    "  raw_json jsonb not null default '{}'::jsonb,",
+    "  imported_at timestamptz not null default now()",
+    ");",
+    `create table if not exists "${schema}"."app_counters" (`,
+    "  counter_key text primary key,",
+    "  current_no bigint not null default 0,",
+    "  updated_at_text text not null default '',",
+    "  raw_json jsonb not null default '{}'::jsonb,",
+    "  imported_at timestamptz not null default now()",
+    ");",
+    `create index if not exists loans_member_id_idx on "${schema}"."loans" (member_id);`,
+    `create index if not exists loans_status_idx on "${schema}"."loans" (status);`,
+    `create index if not exists transactions_contract_no_idx on "${schema}"."transactions" (contract_no);`,
+    `create index if not exists transactions_member_id_idx on "${schema}"."transactions" (member_id);`,
+    `create index if not exists transactions_occurred_on_text_idx on "${schema}"."transactions" (occurred_on_text);`,
+    `create index if not exists app_users_role_idx on "${schema}"."app_users" (role);`,
+    `create index if not exists app_users_status_idx on "${schema}"."app_users" (status);`,
+  ].join("\n");
+};
+
+const callSupabaseManagementQuery = async (
+  config: Record<string, unknown>,
+  sql: string,
+  readOnly: boolean,
+) => {
+  const env = ensureConfigured();
+  const projectRef = normalizeText(config.projectRef) ||
+    deriveProjectRefFromUrl(config.url) ||
+    deriveProjectRefFromUrl(env.supabaseUrl);
+  const managementToken = normalizeText(config.managementToken);
+  if (!projectRef || !managementToken) {
+    throw new Error(
+      "ยังไม่ได้ระบุ project ref หรือ management token สำหรับสร้างโครงสร้าง Supabase",
+    );
+  }
+  const response = await fetch(
+    `https://api.supabase.com/v1/projects/${
+      encodeURIComponent(projectRef)
+    }/database/query`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${managementToken}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify({
+        query: normalizeText(sql),
+        read_only: !!readOnly,
+      }),
+    },
+  );
+  if (!response.ok) {
+    const errorText = normalizeText(await response.text());
+    throw new Error(
+      `Supabase management API error (${response.status}): ${
+        errorText || "unknown error"
+      }`,
+    );
+  }
+  try {
+    return await response.json();
+  } catch {
+    return {};
+  }
+};
+
+const buildSetupConfigSnapshot = (input: unknown) => {
+  const env = ensureConfigured();
+  const raw = normalizeSettingsInputObject(input);
+  const url = normalizeText(raw.url) || env.supabaseUrl;
+  const projectRef = normalizeText(raw.projectRef) ||
+    deriveProjectRefFromUrl(url);
+  const schema = normalizeText(raw.schema) || "public";
+  const managementToken = normalizeText(raw.managementToken);
+  const serviceRoleKey = normalizeText(raw.serviceRoleKey);
+  return {
+    url,
+    projectRef,
+    schema,
+    managementToken,
+    serviceRoleKey,
+    hasServiceRoleKey: !!serviceRoleKey,
+    hasManagementToken: !!managementToken,
+    serviceRoleKeyMasked: buildMaskedSecret(serviceRoleKey),
+    managementTokenMasked: buildMaskedSecret(managementToken),
+  };
+};
+
+const normalizeImportedLoanRow = (loan: Record<string, unknown>) => {
+  const nowIso = new Date().toISOString();
+  const contractNo = normalizeText(
+    loan.contract || loan.contractNo || loan["เลขที่สัญญา"],
+  );
+  if (!contractNo) return null;
+  return {
+    contract_no: contractNo,
+    member_id: normalizeText(
+      loan.memberId || loan.member_id || loan.id || loan["รหัสสมาชิก"],
+    ),
+    borrower_name: normalizeText(
+      loan.member || loan.borrowerName || loan.borrower_name ||
+        loan["ชื่อ-สกุลผู้กู้"],
+    ),
+    principal_amount:
+      Number(loan.amount || loan.principalAmount || loan.principal_amount) || 0,
+    interest_rate:
+      Number(loan.interest || loan.interestRate || loan.interest_rate) || 0,
+    outstanding_balance: Number(
+      loan.balance || loan.outstandingBalance || loan.outstanding_balance,
+    ) || 0,
+    status: normalizeText(loan.status),
+    due_date_text: normalizeText(
+      loan.nextPayment || loan.dueDate || loan.due_date_text ||
+        loan["วันครบกำหนด"],
+    ),
+    overdue_months: Math.max(
+      0,
+      Number(
+        loan.missedInterestMonths || loan.overdueMonths ||
+          loan.overdue_months || loan["จำนวนเดือนค้างชำระ"],
+      ) || 0,
+    ),
+    created_date_text: normalizeText(
+      loan.createdAt || loan.created_date_text || loan["วันที่สร้างสัญญา"],
+    ),
+    guarantor_1: normalizeText(
+      loan.guarantor1 || loan.guarantor_1 || loan["ผู้ค้ำประกัน 1"],
+    ),
+    guarantor_2: normalizeText(
+      loan.guarantor2 || loan.guarantor_2 || loan["ผู้ค้ำประกัน 2"],
+    ),
+    raw_json: normalizeJsonPayloadValue(loan) as JsonObject,
+    updated_at: nowIso,
+    imported_at: nowIso,
+  } as JsonObject;
+};
+
+const normalizeImportedMemberRow = (member: Record<string, unknown>) => {
+  const nowIso = new Date().toISOString();
+  const memberId = normalizeText(
+    member.id || member.memberId || member.member_id || member["รหัสสมาชิก"],
+  );
+  if (!memberId) return null;
+  return {
+    member_id: memberId,
+    full_name: normalizeText(
+      member.name || member.fullName || member.full_name || member["ชื่อ-สกุล"],
+    ),
+    status: normalizeText(member.status),
+    raw_json: normalizeJsonPayloadValue(member) as JsonObject,
+    updated_at: nowIso,
+    imported_at: nowIso,
+  } as JsonObject;
+};
+
+const normalizeImportedTransactionRow = (tx: Record<string, unknown>) => {
+  const nowIso = new Date().toISOString();
+  const referenceId = normalizeText(
+    tx.id || tx.referenceId || tx.reference_id || tx["รหัสอ้างอิง"],
+  );
+  if (!referenceId) return null;
+  return {
+    reference_id: referenceId,
+    occurred_on_text: normalizeText(
+      tx.timestamp || tx.occurredOn || tx.occurred_on_text ||
+        tx["วัน/เดือน/ปี (พ.ศ.)"],
+    ),
+    contract_no: normalizeText(
+      tx.contract || tx.contractNo || tx.contract_no || tx["เลขที่สัญญา"],
+    ),
+    member_id: normalizeText(tx.memberId || tx.member_id || tx["รหัสสมาชิก"]),
+    principal_paid:
+      Number(tx.principalPaid || tx.principal_paid || tx["ชำระเงินต้น"]) || 0,
+    interest_paid:
+      Number(tx.interestPaid || tx.interest_paid || tx["ชำระดอกเบี้ย"]) || 0,
+    outstanding_balance: Number(
+      tx.newBalance || tx.balance || tx.outstandingBalance ||
+        tx.outstanding_balance || tx["ยอดคงเหลือ"],
+    ) || 0,
+    note: normalizeText(tx.note || tx["หมายเหตุ"]),
+    actor: normalizeText(tx.actor || tx.performedBy || tx["ผู้ทำรายการ"]),
+    full_name: normalizeText(
+      tx.memberName || tx.fullName || tx.full_name || tx["ชื่อ-สกุล"],
+    ),
+    tx_status: normalizeText(
+      tx.txStatus || tx.status || tx.tx_status || tx["สถานะการทำรายการ"],
+    ),
+    interest_months_paid: Math.max(
+      0,
+      Number(
+        tx.interestMonthsPaid || tx.interest_months_paid ||
+          tx["จำนวนงวดดอกที่ชำระ"],
+      ) || 0,
+    ),
+    overdue_interest_before: Number(
+      tx.currentMissedInterestMonths || tx.overdueInterestBefore ||
+        tx.overdue_interest_before || tx["ค้างดอกก่อนรับชำระ"],
+    ) || 0,
+    overdue_interest_after: Number(
+      tx.newMissedInterestMonths || tx.overdueInterestAfter ||
+        tx.overdue_interest_after || tx["ค้างดอกหลังรับชำระ"],
+    ) || 0,
+    raw_json: normalizeJsonPayloadValue(tx) as JsonObject,
+    updated_at: nowIso,
+    imported_at: nowIso,
+  } as JsonObject;
+};
+
+const normalizeImportedUserRow = (user: Record<string, unknown>) => {
+  const nowIso = new Date().toISOString();
+  const username = normalizeLower(user.username);
+  if (!username) return null;
+  return {
+    user_id: normalizeText(user.userId || user.user_id) || crypto.randomUUID(),
+    username,
+    full_name: normalizeText(user.fullName || user.full_name),
+    email: normalizeLower(user.email),
+    password_hash: normalizeText(user.passwordHash || user.password_hash),
+    role: normalizeRole(user.role),
+    status: normalizeUserStatus(user.status),
+    created_at_text: normalizeText(user.createdAt || user.created_at_text),
+    updated_at_text: normalizeText(user.updatedAt || user.updated_at_text) ||
+      formatThaiDateTime(new Date()),
+    last_login_at_text: normalizeText(
+      user.lastLoginAt || user.last_login_at_text,
+    ),
+    reset_otp_hash: normalizeText(user.resetOtpHash || user.reset_otp_hash),
+    reset_otp_expire_at_text: normalizeText(
+      user.resetOtpExpireAt || user.reset_otp_expire_at_text,
+    ),
+    reset_otp_requested_at_text: normalizeText(
+      user.resetOtpRequestedAt || user.reset_otp_requested_at_text,
+    ),
+    reset_otp_used_at_text: normalizeText(
+      user.resetOtpUsedAt || user.reset_otp_used_at_text,
+    ),
+    permissions_json: normalizeText(
+      user.permissionsJson || user.permissions_json,
+    ),
+    prefix: normalizeText(user.prefix),
+    first_name: normalizeText(user.firstName || user.first_name),
+    last_name: normalizeText(user.lastName || user.last_name),
+    email_verified_at_text: normalizeText(
+      user.emailVerifiedAt || user.email_verified_at_text,
+    ),
+    pin_hash: normalizeText(user.pinHash || user.pin_hash),
+    pin_unique_key: normalizeText(user.pinUniqueKey || user.pin_unique_key),
+    pin_updated_at_text: normalizeText(
+      user.pinUpdatedAt || user.pin_updated_at_text,
+    ),
+    email_verify_otp_hash: normalizeText(
+      user.emailVerifyOtpHash || user.email_verify_otp_hash,
+    ),
+    email_verify_otp_expire_at_text: normalizeText(
+      user.emailVerifyOtpExpireAt || user.email_verify_otp_expire_at_text,
+    ),
+    email_verify_otp_requested_at_text: normalizeText(
+      user.emailVerifyOtpRequestedAt || user.email_verify_otp_requested_at_text,
+    ),
+    raw_json: normalizeJsonPayloadValue(user) as JsonObject,
+    imported_at: nowIso,
+  } as JsonObject;
+};
+
+const buildDefaultImportedAdminUser = async () => {
+  const nowIso = new Date().toISOString();
+  const defaultPin = "123456";
+  return {
+    user_id: crypto.randomUUID(),
+    username: "admin",
+    full_name: "ผู้ดูแลระบบ",
+    email: "admin@local.invalid",
+    password_hash: await createHashRecord("admin"),
+    role: "admin",
+    status: USER_STATUS_ACTIVE,
+    created_at_text: formatThaiDateTime(new Date()),
+    updated_at_text: formatThaiDateTime(new Date()),
+    last_login_at_text: "",
+    reset_otp_hash: "",
+    reset_otp_expire_at_text: "",
+    reset_otp_requested_at_text: "",
+    reset_otp_used_at_text: "",
+    permissions_json: "",
+    prefix: "",
+    first_name: "",
+    last_name: "",
+    email_verified_at_text: formatThaiDateTime(new Date()),
+    pin_hash: await createHashRecord(defaultPin),
+    pin_unique_key: await computePinUniqueKey(defaultPin),
+    pin_updated_at_text: formatThaiDateTime(new Date()),
+    email_verify_otp_hash: "",
+    email_verify_otp_expire_at_text: "",
+    email_verify_otp_requested_at_text: "",
+    raw_json: {
+      seededBy: "edge-setup-default-admin",
+    },
+    imported_at: nowIso,
+  } as JsonObject;
+};
+
+const normalizeImportedAuditLogRow = (record: Record<string, unknown>) => {
+  const nowIso = new Date().toISOString();
+  const occurredAt = normalizeText(
+    record.timestamp || record.occurredAt || record.occurred_at_text ||
+      record["วัน/เดือน/ปี (พ.ศ.)"],
+  );
+  const action = normalizeText(record.action || record.Action);
+  const details = normalizeText(record.details || record.Details);
+  if (!occurredAt && !action && !details) return null;
+  return {
+    occurred_at_text: occurredAt,
+    username: normalizeText(record.username || record.Username),
+    display_name: normalizeText(
+      record.actorName || record.displayName || record.display_name ||
+        record["ชื่อผู้ใช้"],
+    ),
+    role: normalizeText(record.role || record.Role),
+    action,
+    entity_type: normalizeText(
+      record.entityType || record.entity_type || record.EntityType,
+    ),
+    entity_id: normalizeText(
+      record.entityId || record.entity_id || record.EntityId,
+    ),
+    reference_no: normalizeText(
+      record.referenceNo || record.reference_no || record.ReferenceNo,
+    ),
+    before_json: normalizeText(
+      record.beforeJson || record.before_json || record.BeforeJson,
+    ),
+    after_json: normalizeText(
+      record.afterJson || record.after_json || record.AfterJson,
+    ),
+    reason: normalizeText(record.reason || record.Reason),
+    details,
+    raw_json: normalizeJsonPayloadValue(record) as JsonObject,
+    imported_at: nowIso,
+  } as JsonObject;
+};
+
+const normalizeImportedCounterRow = (counter: Record<string, unknown>) => {
+  const nowIso = new Date().toISOString();
+  const counterKey = normalizeText(
+    counter.counterKey || counter.counter_key || counter.CounterKey,
+  );
+  if (!counterKey) return null;
+  return {
+    counter_key: counterKey,
+    current_no:
+      Number(counter.currentNo || counter.current_no || counter.CurrentNo) || 0,
+    updated_at_text: normalizeText(
+      counter.updatedAt || counter.updated_at_text || counter.UpdatedAt,
+    ),
+    raw_json: normalizeJsonPayloadValue(counter) as JsonObject,
+    imported_at: nowIso,
+  } as JsonObject;
+};
+
+const buildImportedSettingsRows = (setupPayload: Record<string, unknown>) => {
+  const nowIso = new Date().toISOString();
+  const rows = new Map<string, JsonObject>();
+  const pushSetting = (
+    key: string,
+    valueText: string,
+    valueJson?: JsonValue | null,
+  ) => {
+    const normalizedKey = normalizeText(key);
+    if (!normalizedKey) return;
+    rows.set(normalizedKey, {
+      key: normalizedKey,
+      value_text: String(valueText ?? ""),
+      value_json: valueJson ?? null,
+      updated_at: nowIso,
+    });
+  };
+
+  const interestRate = Number(setupPayload.interestRate);
+  if (Number.isFinite(interestRate) && interestRate > 0) {
+    pushSetting("InterestRate", String(interestRate), interestRate);
+  }
+
+  const notificationSettings = normalizeSettingsInputObject(
+    setupPayload.notificationSettings,
+  );
+  const notificationEntries: Array<[string, unknown]> = [
+    ["NotificationRecipients", notificationSettings.recipients],
+    ["NotifyApprovalSubmitted", notificationSettings.notifyApprovalSubmitted],
+    ["NotifyApprovalApproved", notificationSettings.notifyApprovalApproved],
+    ["NotifyApprovalRejected", notificationSettings.notifyApprovalRejected],
+    ["NotifyAttachmentUploaded", notificationSettings.notifyAttachmentUploaded],
+    ["NotifyPaymentCreated", notificationSettings.notifyPaymentCreated],
+    ["NotifyPaymentReversed", notificationSettings.notifyPaymentReversed],
+    ["NotifyReportArchived", notificationSettings.notifyReportArchived],
+    ["NotifyAccountingClosed", notificationSettings.notifyAccountingClosed],
+    ["NotifyBackupCompleted", notificationSettings.notifyBackupCompleted],
+  ];
+  for (const [key, value] of notificationEntries) {
+    if (value === undefined) continue;
+    pushSetting(
+      key,
+      String(value ?? ""),
+      typeof value === "boolean" ? value : null,
+    );
+  }
+
+  const operatingDayCalendar = normalizeSettingsInputObject(
+    setupPayload.operatingDayCalendar,
+  );
+  if (Object.keys(operatingDayCalendar).length > 0) {
+    pushSetting(
+      OPERATING_DAY_CALENDAR_SETTING_KEY,
+      JSON.stringify(operatingDayCalendar),
+      normalizeJsonPayloadValue(operatingDayCalendar),
+    );
+  }
+
+  const reportLayoutSettings = normalizeSettingsInputObject(
+    setupPayload.reportLayoutSettings,
+  );
+  if (Object.keys(reportLayoutSettings).length > 0) {
+    pushSetting(
+      REPORT_LAYOUT_SETTINGS_KEY,
+      JSON.stringify(reportLayoutSettings),
+      normalizeJsonPayloadValue(reportLayoutSettings),
+    );
+  }
+
+  const menuSettings = normalizeSettingsInputObject(setupPayload.menuSettings);
+  if (Object.keys(menuSettings).length > 0) {
+    pushSetting(
+      MENU_SETTINGS_KEY,
+      JSON.stringify(menuSettings),
+      normalizeJsonPayloadValue(menuSettings),
+    );
+  }
+
+  const settingsMap = normalizeSettingsInputObject(
+    setupPayload.settingsMap || setupPayload.settings,
+  );
+  for (const [key, value] of Object.entries(settingsMap)) {
+    if (
+      [
+        "notificationSettings",
+        "operatingDayCalendar",
+        "reportLayoutSettings",
+        "menuSettings",
+      ].includes(key)
+    ) {
+      continue;
+    }
+    const normalizedValue = normalizeJsonPayloadValue(value);
+    pushSetting(
+      key,
+      typeof normalizedValue === "string"
+        ? normalizedValue
+        : JSON.stringify(normalizedValue ?? null),
+      normalizedValue,
+    );
+  }
+
+  return Array.from(rows.values());
+};
+
+const appendAuditLogEntry = async (
+  session: SessionData,
+  payload: {
+    action: string;
+    entityType: string;
+    entityId?: string;
+    referenceNo?: string;
+    before?: JsonValue;
+    after?: JsonValue;
+    reason?: string;
+    details?: string;
+  },
+) => {
+  await insertSupabaseBatch("audit_logs", [{
+    occurred_at_text: formatThaiDateTime(new Date()),
+    username: normalizeText(session.username),
+    display_name: normalizeText(session.fullName || session.username),
+    role: normalizeRole(session.role),
+    action: normalizeText(payload.action),
+    entity_type: normalizeText(payload.entityType),
+    entity_id: normalizeText(payload.entityId),
+    reference_no: normalizeText(payload.referenceNo),
+    before_json: payload.before === undefined
+      ? ""
+      : JSON.stringify(payload.before),
+    after_json: payload.after === undefined
+      ? ""
+      : JSON.stringify(payload.after),
+    reason: normalizeText(payload.reason),
+    details: normalizeText(payload.details),
+    raw_json: normalizeJsonPayloadValue(payload) as JsonObject,
+    imported_at: new Date().toISOString(),
+  }]);
+};
+
+const getSupabaseSetupStatus = async (payload: RpcPayload) => {
+  const { session } = await resolveSession(payload);
+  requirePermission(session, "settings.manage", "ไม่มีสิทธิ์ดูการตั้งค่า Supabase");
+
+  const rawArg = payload.args?.[0];
+  const config = buildSetupConfigSnapshot(parseJsonObjectArg(rawArg));
+  const schemaStatus = await inspectSupabaseManagedTables();
+  const counts: Record<string, number> = {};
+  for (const tableName of schemaStatus.tables) {
+    const rows = await callSupabase(tableName, {
+      select: "*",
+      limit: "1",
+    });
+    counts[tableName] = rows.length;
+  }
+  return {
+    provider: "supabase",
+    config,
+    ready: schemaStatus.ready,
+    tables: schemaStatus.tables,
+    missingTables: schemaStatus.missingTables,
+    counts,
+    message: schemaStatus.ready
+      ? "Supabase Edge Function เชื่อมต่อฐานข้อมูลได้และพบตารางหลักครบแล้ว"
+      : "เชื่อมต่อ Supabase ได้ แต่ยังต้องสร้างตารางบางส่วนก่อนนำเข้าข้อมูล",
+  } as JsonObject;
+};
+
+const setupDatabase = async (payload: RpcPayload) => {
+  const { session } = await resolveSession(payload);
+  requirePermission(session, "settings.manage", "ไม่มีสิทธิ์ตั้งค่าฐานข้อมูลอัตโนมัติ");
+
+  const rawArg = payload.args?.[0];
+  const setupPayload = parseJsonObjectArg(rawArg);
+  const config = buildSetupConfigSnapshot(
+    setupPayload.config || setupPayload.supabase || setupPayload,
+  );
+
+  let schemaStatus = await inspectSupabaseManagedTables();
+  if (!schemaStatus.ready) {
+    if (!config.hasManagementToken) {
+      throw new Error(
+        "ยังไม่พบตาราง Supabase หลักครบ และไม่ได้ระบุ management token เพื่อสร้างโครงสร้างฐานข้อมูล",
+      );
+    }
+    await callSupabaseManagementQuery(
+      config,
+      buildSupabaseSchemaSql(config.schema),
+      false,
+    );
+    schemaStatus = await inspectSupabaseManagedTables();
+  }
+
+  const importedLoans = Array.isArray(setupPayload.loans)
+    ? (setupPayload.loans as Array<Record<string, unknown>>)
+      .map(normalizeImportedLoanRow)
+      .filter((row): row is JsonObject => !!row)
+    : [];
+  const importedMembers = Array.isArray(setupPayload.members)
+    ? (setupPayload.members as Array<Record<string, unknown>>)
+      .map(normalizeImportedMemberRow)
+      .filter((row): row is JsonObject => !!row)
+    : [];
+  const transactionSource = Array.isArray(setupPayload.transactions)
+    ? setupPayload.transactions as Array<Record<string, unknown>>
+    : (Array.isArray(setupPayload.recentTransactions)
+      ? setupPayload.recentTransactions as Array<Record<string, unknown>>
+      : []);
+  const importedTransactions = transactionSource
+    .map(normalizeImportedTransactionRow)
+    .filter((row): row is JsonObject => !!row);
+  const importedUsers = Array.isArray(setupPayload.users)
+    ? (setupPayload.users as Array<Record<string, unknown>>)
+      .map(normalizeImportedUserRow)
+      .filter((row): row is JsonObject => !!row)
+    : [];
+  const importedAuditLogs = Array.isArray(setupPayload.auditLogs)
+    ? (setupPayload.auditLogs as Array<Record<string, unknown>>)
+      .map(normalizeImportedAuditLogRow)
+      .filter((row): row is JsonObject => !!row)
+    : [];
+  const importedCounters = Array.isArray(setupPayload.counters)
+    ? (setupPayload.counters as Array<Record<string, unknown>>)
+      .map(normalizeImportedCounterRow)
+      .filter((row): row is JsonObject => !!row)
+    : [];
+  const importedSettings = buildImportedSettingsRows(setupPayload);
+
+  if (!importedUsers.length) {
+    importedUsers.push(await buildDefaultImportedAdminUser());
+  }
+
+  const summary = {
+    loans: await upsertSupabaseBatch("loans", importedLoans, ["contract_no"]),
+    members: await upsertSupabaseBatch("members", importedMembers, [
+      "member_id",
+    ]),
+    transactions: await upsertSupabaseBatch(
+      "transactions",
+      importedTransactions,
+      ["reference_id"],
+    ),
+    settings: await upsertSupabaseBatch("app_settings", importedSettings, [
+      "key",
+    ]),
+    users: await upsertSupabaseBatch("app_users", importedUsers, ["user_id"]),
+    auditLogs: await insertSupabaseBatch("audit_logs", importedAuditLogs),
+    counters: await upsertSupabaseBatch("app_counters", importedCounters, [
+      "counter_key",
+    ]),
+  };
+
+  await appendAuditLogEntry(session, {
+    action: "SETUP_DATABASE",
+    entityType: "SYSTEM",
+    entityId: "Supabase",
+    referenceNo: "Supabase",
+    after: summary as unknown as JsonValue,
+    details: "Backfill ข้อมูลไป Supabase ผ่าน Edge Function สำเร็จ",
+  });
+
+  return {
+    provider: "supabase",
+    message: "สร้างโครงสร้างและย้ายข้อมูลไป Supabase ผ่าน Edge Function เรียบร้อยแล้ว",
+    ...summary,
+    tables: schemaStatus.tables,
+    missingTables: schemaStatus.missingTables,
+  } as JsonObject;
 };
 
 const buildCurrentUserSnapshot = async (session: SessionData) => {
@@ -2609,22 +3212,6 @@ const savePayment = async (payload: RpcPayload) => {
     overdue_months: newMissedInterestMonths,
   });
 
-  await appendAuditLogEntry(session, {
-    action: "SAVE_PAYMENT",
-    entityType: "TRANSACTION",
-    entityId: txId,
-    referenceNo: contractNo,
-    after: {
-      transactionId: txId,
-      contract: contractNo,
-      principalPaid,
-      interestPaid,
-      newBalance,
-      status: serverStatus,
-    },
-    details: `บันทึกรับชำระสัญญา ${contractNo}`,
-  });
-
   return buildSavePaymentResponse(
     txId,
     timestamp,
@@ -2730,21 +3317,6 @@ const cancelPayment = async (payload: RpcPayload) => {
     overdue_months: finalMissedInterestMonths,
   });
 
-  await appendAuditLogEntry(session, {
-    action: "REVERSE_PAYMENT",
-    entityType: "TRANSACTION",
-    entityId: normalizedTransactionId,
-    referenceNo: reversalTransactionId,
-    reason: normalizedReason,
-    after: {
-      contract: contractNo,
-      reversalTransactionId,
-      finalBalance,
-      finalStatus,
-    },
-    details: `กลับรายการรับชำระสัญญา ${contractNo}`,
-  });
-
   return {
     message: "ลบรายการรับชำระเรียบร้อยแล้ว และคืนยอดสัญญาอัตโนมัติ",
     transactionId: normalizedTransactionId,
@@ -2792,14 +3364,6 @@ const addMember = async (payload: RpcPayload) => {
   }
 
   await upsertMemberRow(member);
-  await appendAuditLogEntry(session, {
-    action: "ADD_MEMBER",
-    entityType: "MEMBER",
-    entityId: member.id,
-    referenceNo: member.id,
-    after: member as unknown as JsonObject,
-    details: `เพิ่มสมาชิก ${member.id}`,
-  });
   return {
     action: "createdMember",
     member,
@@ -2844,14 +3408,6 @@ const updateMember = async (payload: RpcPayload) => {
     previousMemberName,
     member.name,
   );
-  await appendAuditLogEntry(session, {
-    action: "UPDATE_MEMBER",
-    entityType: "MEMBER",
-    entityId: member.id,
-    referenceNo: member.id,
-    after: member as unknown as JsonObject,
-    details: `แก้ไขสมาชิก ${member.id}`,
-  });
   return { ok: true } as JsonObject;
 };
 
@@ -2887,15 +3443,6 @@ const addLoan = async (payload: RpcPayload) => {
     missedInterestMonths: 0,
     guarantor1: normalizedGuarantors.guarantor1 || "",
     guarantor2: normalizedGuarantors.guarantor2 || "",
-  });
-
-  await appendAuditLogEntry(session, {
-    action: "ADD_LOAN",
-    entityType: "LOAN",
-    entityId: loanData.contract,
-    referenceNo: loanData.contract,
-    after: loanData as unknown as JsonObject,
-    details: `เพิ่มสัญญา ${loanData.contract}`,
   });
 
   return {
@@ -2953,14 +3500,6 @@ const editLoan = async (payload: RpcPayload) => {
   });
 
   await syncMemberRegisterFromLoanEdit(loanData.memberId, loanData.member);
-  await appendAuditLogEntry(session, {
-    action: "EDIT_LOAN",
-    entityType: "LOAN",
-    entityId: loanData.contract,
-    referenceNo: loanData.contract,
-    after: loanData as unknown as JsonObject,
-    details: `แก้ไขสัญญา ${loanData.contract}`,
-  });
 
   return {
     message: "แก้ไขข้อมูลสัญญาเรียบร้อยแล้ว",
@@ -3009,15 +3548,6 @@ const updateLoanStatus = async (payload: RpcPayload) => {
     },
   });
 
-  await appendAuditLogEntry(session, {
-    action: "UPDATE_LOAN_STATUS",
-    entityType: "LOAN",
-    entityId: contractNo,
-    referenceNo: contractNo,
-    after: { status },
-    details: `อัปเดตสถานะสัญญา ${contractNo}`,
-  });
-
   return {
     message: "อัปเดตสถานะสัญญาเรียบร้อยแล้ว",
     contract: contractNo,
@@ -3042,13 +3572,6 @@ const deleteLoan = async (payload: RpcPayload) => {
   }
 
   await deleteSupabaseRows("loans", { contract_no: `eq.${contractNo}` });
-  await appendAuditLogEntry(session, {
-    action: "DELETE_LOAN",
-    entityType: "LOAN",
-    entityId: contractNo,
-    referenceNo: contractNo,
-    details: `ลบสัญญา ${contractNo}`,
-  });
   return {
     message: "ลบข้อมูลสัญญาสำเร็จ",
     contract: contractNo,
@@ -3292,15 +3815,6 @@ const saveSettings = async (payload: RpcPayload) => {
   if (Object.keys(updates).length > 0) {
     await upsertAppSettingValues(updates);
   }
-
-  await appendAuditLogEntry(session, {
-    action: "SAVE_SETTINGS",
-    entityType: "SETTING",
-    entityId: "app_settings",
-    referenceNo: "app_settings",
-    after: updates as unknown as JsonObject,
-    details: "บันทึกการตั้งค่าระบบ",
-  });
 
   const response: JsonObject = {
     message: "บันทึกการตั้งค่าเรียบร้อยแล้ว",
