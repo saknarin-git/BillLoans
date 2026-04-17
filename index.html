@@ -3414,9 +3414,11 @@
         { id: "notificationHistory", categoryId: "workflow", title: "ประวัติการแจ้งเตือน", summary: "ตรวจสอบอีเมลที่ส่งสำเร็จ ล้มเหลว หรือถูกข้าม", badge: "ตรวจสอบ", visible: !!canViewNotificationHistory, favorite: false, recent: true, risk: false },
         { id: "operatingDayConfig", categoryId: "finance", title: "กำหนดวันทำการ", summary: "บันทึกวันทำการจริงรายเดือนและเก็บประวัติย้อนหลังให้รายงานอ้างอิงอัตโนมัติ", badge: "งานประจำเดือน", visible: !!(canManageSettings || canViewSettings), favorite: true, recent: true, risk: false },
         { id: "reportLayoutConfig", categoryId: "finance", title: "หน้ากระดาษและคอลัมน์รายงาน", summary: "กำหนดระยะขอบกระดาษและความกว้างคอลัมน์ของรายงานแต่ละประเภท", badge: "รูปแบบพิมพ์", visible: !!(canManageSettings || canViewSettings), favorite: true, recent: true, risk: false },
+        { id: "closeAccounting", categoryId: "finance", title: "ปิดยอดบัญชี", summary: "คำนวณค้างดอกและปิดยอดรอบบัญชีประจำเดือนตามสิทธิ์ที่ได้รับ", badge: canCloseAccounting ? "ปิดรอบ" : "ขออนุมัติ", visible: !!(canCloseAccounting || canRequestApprovals), favorite: true, recent: true, risk: true },
           { id: "driveBackupConfig", categoryId: "database", title: "AutoBackup Google Drive", summary: "ตั้งค่าโฟลเดอร์ รอบเวลา และการสำรองข้อมูลอัตโนมัติ", badge: canManageSettings ? "แอดมิน" : "ดูได้", visible: !!(canManageSettings || canViewSettings), favorite: true, recent: false, risk: true },
         { id: "driveBackupHistory", categoryId: "database", title: "ประวัติ AutoBackup", summary: "ดูผลลัพธ์รอบสำรองข้อมูลล่าสุดและสถานะการทำงาน", badge: "ตรวจสอบ", visible: !!(canManageSettings || canViewSettings), favorite: false, recent: true, risk: false },
         { id: "setupDatabase", categoryId: "database", title: "ตั้งค่า Supabase อัตโนมัติ", summary: "บันทึกคอนฟิก สร้างตารางหลัก และย้ายข้อมูลจากชีตไป Supabase", badge: "งานเสี่ยง", visible: !!canManageSettings, favorite: false, recent: false, risk: true },
+        { id: "archiveTransactions", categoryId: "database", title: "BackUp ธุรกรรม", summary: "ย้ายธุรกรรมจากชีตหลักไปเก็บตามชีตรายเดือน หรือส่งคำขออนุมัติแทน", badge: canRunBackup ? "สำรองข้อมูล" : "ขออนุมัติ", visible: !!(canRunBackup || canRequestApprovals), favorite: true, recent: true, risk: true },
         { id: "syncMemberDatabase", categoryId: "database", title: "อัพเดตฐานข้อมูลสมาชิก", summary: "ซิงก์ชื่อสมาชิกและข้อมูลผู้ค้ำจากทะเบียนสมาชิกเข้าสู่ Loans", badge: "บำรุงรักษา", visible: false, favorite: false, recent: true, risk: true },
         { id: "auditLogs", categoryId: "audit", title: "Audit Logs", summary: "ตรวจสอบว่าใครทำอะไรกับข้อมูลใดและเมื่อไร", badge: "ตรวจสอบ", visible: !!canViewAuditLogs, favorite: false, recent: true, risk: false }
       ].filter((item) => item.visible !== false);
@@ -3455,9 +3457,11 @@
         { id: "notificationHistory", categoryId: "workflow", visible: !!canViewNotificationHistory },
         { id: "operatingDayConfig", categoryId: "finance", visible: !!(canManageSettings || canViewSettings) },
         { id: "reportLayoutConfig", categoryId: "finance", visible: !!(canManageSettings || canViewSettings) },
+        { id: "closeAccounting", categoryId: "finance", visible: !!(canCloseAccounting || canRequestApprovals) },
         { id: "driveBackupConfig", categoryId: "database", visible: !!(canManageSettings || canViewSettings) },
         { id: "driveBackupHistory", categoryId: "database", visible: !!(canManageSettings || canViewSettings) },
         { id: "setupDatabase", categoryId: "database", visible: !!canManageSettings },
+        { id: "archiveTransactions", categoryId: "database", visible: !!(canRunBackup || canRequestApprovals) },
         { id: "syncMemberDatabase", categoryId: "database", visible: false },
         { id: "auditLogs", categoryId: "audit", visible: !!canViewAuditLogs }
       ].filter((item) => item.visible !== false);
@@ -15338,9 +15342,11 @@ const loadNotificationHistory = (forceReload = false) => {
       { id: "notificationHistory", categoryId: "workflow", title: "ประวัติการแจ้งเตือน", summary: "ตรวจสอบอีเมลที่ส่งสำเร็จ ล้มเหลว หรือถูกข้าม", badge: "ตรวจสอบ", favorite: false, recent: true, risk: false, visible: !!canViewNotificationHistory, render: renderNotificationHistoryPanel },
       { id: "operatingDayConfig", categoryId: "finance", title: "กำหนดวันทำการ", summary: "บันทึกวันทำการจริงรายเดือนและเก็บประวัติย้อนหลังให้รายงานอ้างอิงอัตโนมัติ", badge: canManageSettings ? "แอดมิน" : "ดูได้", favorite: true, recent: true, risk: false, visible: !!(canManageSettings || canViewSettings), render: renderOperatingDayPanel },
       { id: "reportLayoutConfig", categoryId: "finance", title: "หน้ากระดาษและคอลัมน์รายงาน", summary: "กำหนดระยะขอบกระดาษและความกว้างคอลัมน์ของรายงานแต่ละประเภท", badge: canManageSettings ? "แอดมิน" : "ดูได้", favorite: true, recent: true, risk: false, visible: !!(canManageSettings || canViewSettings), render: renderReportLayoutPanel },
+      { id: "closeAccounting", categoryId: "finance", title: "ปิดยอดบัญชี", summary: "คำนวณค้างดอกและปิดยอดรอบบัญชีประจำเดือน หรือส่งคำขออนุมัติแทนตามสิทธิ์", badge: canCloseAccounting ? "ปิดรอบ" : "ขออนุมัติ", favorite: true, recent: true, risk: true, visible: !!(canCloseAccounting || canRequestApprovals), render: renderCloseAccountingPanel },
       { id: "driveBackupConfig", categoryId: "database", title: "AutoBackup Google Drive", summary: "ตั้งค่าโฟลเดอร์ รอบเวลา และการสำรองข้อมูลอัตโนมัติ", badge: canManageSettings ? "แอดมิน" : "ดูได้", favorite: true, recent: false, risk: true, visible: !!(canManageSettings || canViewSettings), render: renderDriveAutoBackupPanel },
       { id: "driveBackupHistory", categoryId: "database", title: "ประวัติ AutoBackup", summary: "ดูผลลัพธ์รอบสำรองข้อมูลล่าสุดและสถานะการทำงาน", badge: "ตรวจสอบ", favorite: false, recent: true, risk: false, visible: !!(canManageSettings || canViewSettings), render: renderDriveAutoBackupHistoryPanel },
       { id: "setupDatabase", categoryId: "database", title: "ตั้งค่า Supabase อัตโนมัติ", summary: "บันทึกคอนฟิก สร้างตารางหลัก และย้ายข้อมูลจากชีตไป Supabase", badge: "งานเสี่ยง", favorite: false, recent: false, risk: true, visible: !!canManageSettings, render: renderSetupDatabasePanel },
+      { id: "archiveTransactions", categoryId: "database", title: "BackUp ธุรกรรม", summary: "ย้ายธุรกรรมจากชีตหลักไปเก็บตามชีตรายเดือน หรือส่งคำขออนุมัติแทนตามสิทธิ์", badge: canRunBackup ? "สำรองข้อมูล" : "ขออนุมัติ", favorite: true, recent: true, risk: true, visible: !!(canRunBackup || canRequestApprovals), render: renderArchivePanel },
       { id: "syncMemberDatabase", categoryId: "database", title: "อัพเดตฐานข้อมูลสมาชิก", summary: "ซิงก์ชื่อสมาชิกและข้อมูลผู้ค้ำจากทะเบียนสมาชิกเข้าสู่ Loans", badge: "บำรุงรักษา", favorite: false, recent: true, risk: true, visible: false, render: renderSyncMemberPanel },
       { id: "auditLogs", categoryId: "audit", title: "Audit Logs", summary: "ตรวจสอบว่าใครทำอะไรกับข้อมูลใดและเมื่อไร", badge: "ตรวจสอบ", favorite: false, recent: true, risk: false, visible: !!canViewAuditLogs, render: renderAuditLogPanel }
     ];
