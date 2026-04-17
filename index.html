@@ -2673,8 +2673,8 @@
   const startAppWhenReady = () => {
     if (__appMounted) return;
     if (!(window.React && window.ReactDOM)) {
-      if (Date.now() - __bootStartedAt > 8000) {
-        showBootFallback("โหลด React/ReactDOM ไม่สำเร็จภายในเวลาที่กำหนด");
+      if (Date.now() - __bootStartedAt > 3000) {
+        showBootFallback("หน้าเริ่มต้นใช้เวลานานเกินไป หรือโหลด React/ReactDOM ไม่สำเร็จ");
         return;
       }
       window.setTimeout(startAppWhenReady, 150);
