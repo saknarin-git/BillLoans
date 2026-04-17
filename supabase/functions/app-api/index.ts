@@ -299,6 +299,81 @@ const getCurrentThaiMonthContext = () => {
   };
 };
 
+const getUserAdminList = async (payload: RpcPayload) => {
+  const { session } = await resolveSession(payload);
+  requirePermission(session, "users.manage", "ไม่มีสิทธิ์จัดการผู้ใช้งาน");
+
+  const rows = await callSupabase("app_users", {
+    select: "user_id,username,full_name,email,prefix,first_name,last_name,email_verified_at_text,role,status,created_at_text,updated_at_text,last_login_at_text,permissions_json",
+    order: "username.asc",
+    limit: "5000",
+  });
+
+  const statusOrder: Record<string, number> = {
+    [USER_STATUS_PENDING]: 0,
+    [USER_STATUS_ACTIVE]: 1,
+    [USER_STATUS_SUSPENDED]: 2,
+  };
+
+  const users = rows.map((row) => ({
+    userId: normalizeText(row.user_id),
+    username: normalizeText(row.username),
+    fullName: normalizeText(row.full_name),
+    email: normalizeText(row.email),
+    prefix: normalizeText(row.prefix),
+    firstName: normalizeText(row.first_name),
+    lastName: normalizeText(row.last_name),
+    emailVerifiedAt: normalizeText(row.email_verified_at_text),
+    role: normalizeRole(row.role),
+    status: normalizeUserStatus(row.status),
+    createdAt: normalizeText(row.created_at_text),
+    updatedAt: normalizeText(row.updated_at_text),
+    lastLoginAt: normalizeText(row.last_login_at_text),
+    permissionsJson: normalizeText(row.permissions_json),
+    permissions: getEffectivePermissions(row, normalizeRole(row.role)),
+  })).sort((a, b) => {
+    const aStatus = normalizeUserStatus(a.status);
+    const bStatus = normalizeUserStatus(b.status);
+    const diff = (statusOrder[aStatus] ?? 99) - (statusOrder[bStatus] ?? 99);
+    if (diff !== 0) return diff;
+    return String(a.username || "").localeCompare(String(b.username || ""));
+  });
+
+  return { users } as JsonObject;
+};
+
+const getAuditLogs = async (payload: RpcPayload) => {
+  const { session } = await resolveSession(payload);
+  requirePermission(session, "audit.view", "ไม่มีสิทธิ์ดู Audit Logs");
+
+  const rawArg = payload.args?.[0];
+  const filter = typeof rawArg === "string" ? normalizeSettingsInputObject(JSON.parse(rawArg || "{}")) : normalizeSettingsInputObject(rawArg);
+  const limit = Math.max(1, Math.min(500, Number(filter.limit) || 150));
+
+  const rows = await callSupabase("audit_logs", {
+    select: "occurred_at_text,username,display_name,role,action,entity_type,entity_id,reference_no,before_json,after_json,reason,details,log_id",
+    order: "log_id.desc",
+    limit: String(Math.min(Math.max(limit, 150), 500)),
+  });
+
+  const records = rows.map((row) => ({
+    timestamp: normalizeText(row.occurred_at_text),
+    username: normalizeText(row.username),
+    actorName: normalizeText(row.display_name),
+    role: normalizeText(row.role),
+    action: normalizeText(row.action),
+    entityType: normalizeText(row.entity_type),
+    entityId: normalizeText(row.entity_id),
+    referenceNo: normalizeText(row.reference_no),
+    beforeJson: normalizeText(row.before_json),
+    afterJson: normalizeText(row.after_json),
+    reason: normalizeText(row.reason),
+    details: normalizeText(row.details),
+  })).filter((record) => record.timestamp || record.action || record.entityId || record.details);
+
+  return { records: records.slice(0, limit) } as JsonObject;
+};
+
 const shouldCountSelectedMonthAsDueForOverdueReport = (
   reportYearBe: number,
   reportMonth: number,
@@ -2438,6 +2513,20 @@ const handlers: Record<string, (payload: RpcPayload) => Promise<Response>> = {
       return success(await getNotificationSettings(payload));
     } catch (error) {
       return appError((error as Error)?.message || "โหลดการตั้งค่าการแจ้งเตือนไม่สำเร็จ", "GET_NOTIFICATION_SETTINGS_FAILED");
+    }
+  },
+  async getUserAdminList(payload) {
+    try {
+      return success(await getUserAdminList(payload));
+    } catch (error) {
+      return appError((error as Error)?.message || "โหลดข้อมูลผู้ใช้ไม่สำเร็จ", "GET_USER_ADMIN_LIST_FAILED", { users: [] });
+    }
+  },
+  async getAuditLogs(payload) {
+    try {
+      return success(await getAuditLogs(payload));
+    } catch (error) {
+      return appError((error as Error)?.message || "โหลด Audit Logs ไม่สำเร็จ", "GET_AUDIT_LOGS_FAILED", { records: [] });
     }
   },
   async saveSettings(payload) {

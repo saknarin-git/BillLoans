@@ -51,13 +51,15 @@
 
 สถานะล่าสุด:
 
-- `verifyLoginPin`, `savePayment`, `cancelPayment`, `addMember`, `updateMember`, `addLoan`, `editLoan`, `updateLoanStatus`, `deleteLoan`, `getNotificationSettings`, `saveSettings` ถูกย้ายมารอบแรกแล้วใน Edge Function
+- `verifyLoginPin`, `getUserAdminList`, `getAuditLogs`, `savePayment`, `cancelPayment`, `addMember`, `updateMember`, `addLoan`, `editLoan`, `updateLoanStatus`, `deleteLoan`, `getNotificationSettings`, `saveSettings` ถูกย้ายมารอบแรกแล้วใน Edge Function
 - `cancelPayment` ยังจำกัดที่การกลับรายการล่าสุดของสัญญา เพื่อหลีกเลี่ยงยอดเพี้ยนก่อนย้าย engine คำนวณย้อนหลังครบ
 - `addMember` รองรับการอัปเกรด `ผู้ค้ำชั่วคราว` เป็นสมาชิกจริงเมื่อจับคู่ชื่อได้ชัดเจนเพียงรายการเดียว
 - `saveSettings` รองรับ `interestRate`, `notificationSettings`, `reportLayoutSettings`, `menuSettings` โดยเขียนลง `app_settings`
 - สิทธิ์ `notifications.manage` ถูกเปิดใช้ใน Edge Function แล้ว และจะอ่านจาก `permissions_json` ของ `app_users`
 - `addLoan` และ `editLoan` รองรับการสร้างผู้ค้ำชั่วคราวอัตโนมัติ และ sync ชื่อผู้กู้กลับไปยังทะเบียนสมาชิกเมื่อแก้ชื่อผู้กู้ในสัญญา
 - `deleteLoan` จะปฏิเสธการลบถ้ามี transaction ผูกกับสัญญาอยู่แล้ว ตามกติกาเดิมของ GAS
+- `getUserAdminList` คืนรูปแบบข้อมูลผู้ใช้ตามหน้า settings เดิม รวมทั้ง `permissionsJson` และ `permissions` ที่คำนวณจาก role/custom permissions
+- `getAuditLogs` คืนรายการล่าสุดจากตาราง `audit_logs` โดยคง shape `records` ให้ตรงกับหน้า admin เดิม
 
 ## แนวทาง implementation ฝั่ง Supabase
 
@@ -88,7 +90,6 @@
 
 ## จุดที่ยังต้องทำต่อ
 
-- implement handler จริงใน Edge Function แทน scaffold
 - export business logic ออกจาก [Code.gs](../Code.gs) เป็นโมดูล TypeScript หรือย้ายเป็น SQL/RPC
 - ออกแบบ session/auth strategy ว่าจะใช้ token ภายในระบบเดิม หรือย้ายไป Supabase Auth
 - ทดสอบ end-to-end จาก GitHub Pages ไปยัง Supabase Edge Function

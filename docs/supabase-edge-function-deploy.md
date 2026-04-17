@@ -270,6 +270,21 @@ $body = @{ method = "editLoan"; args = @($loan); sessionToken = "$($login.sessio
 Invoke-RestMethod -Method Post -Uri "https://fdtjomvkmpohdgdfbzst.functions.supabase.co/app-api" -ContentType "application/json" -Body $body
 ```
 
+### getUserAdminList
+
+```powershell
+$body = @{ method = "getUserAdminList"; args = @(); sessionToken = "$($login.sessionToken)" } | ConvertTo-Json -Depth 5
+Invoke-RestMethod -Method Post -Uri "https://fdtjomvkmpohdgdfbzst.functions.supabase.co/app-api" -ContentType "application/json" -Body $body
+```
+
+### getAuditLogs
+
+```powershell
+$filter = @{ limit = 150 } | ConvertTo-Json -Compress
+$body = @{ method = "getAuditLogs"; args = @($filter); sessionToken = "$($login.sessionToken)" } | ConvertTo-Json -Depth 5
+Invoke-RestMethod -Method Post -Uri "https://fdtjomvkmpohdgdfbzst.functions.supabase.co/app-api" -ContentType "application/json" -Body $body
+```
+
 ## 6. ทดสอบหน้าเว็บกับ backend ใหม่
 
 หน้าเว็บ default ถูกตั้งให้ชี้มาที่ Edge Function นี้แล้ว แต่ยัง override ได้ผ่าน query string:
@@ -293,6 +308,8 @@ https://saknarin-git.github.io/BillLoans/?backend_url=https://fdtjomvkmpohdgdfbz
 - `getPaymentLookupByMemberId`
 - `getTodayTransactionsForMemberPaymentEdit`
 - `getNotificationSettings`
+- `getUserAdminList`
+- `getAuditLogs`
 - `savePayment`
 - `cancelPayment`
 - `addMember`
