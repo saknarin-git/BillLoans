@@ -10,19 +10,19 @@
 
 ## โครงสร้างที่ใช้งานอยู่
 
-- หน้าเว็บหลักอยู่ที่ [Index.html](Index.html)
+- หน้าเว็บหลักอยู่ที่ [index.html](index.html)
 - GitHub Pages deploy อัตโนมัติผ่าน [workflow pages](.github/workflows/pages.yml)
 - ฝั่ง backend อยู่ที่ [Code.gs](Code.gs)
 
 ## วิธีทำงาน
 
 - เมื่อ push ขึ้น branch `main` GitHub Actions จะ deploy หน้าเว็บไปยัง GitHub Pages อัตโนมัติ
-- หน้าเว็บจะเรียก backend ของ Google Apps Script ผ่าน `google.script.run` proxy ที่ฝังไว้ใน [Index.html](Index.html)
-- deployment URL ปัจจุบันของ Apps Script ถูกกำหนดไว้ในตัวแปร `window.__GAS_WEB_APP_URL__` ภายใน [Index.html](Index.html)
+- หน้าเว็บจะเรียก backend ของ Google Apps Script ผ่าน `google.script.run` proxy ที่ฝังไว้ใน [index.html](index.html)
+- deployment URL ปัจจุบันของ Apps Script ถูกกำหนดไว้ในตัวแปร `window.__GAS_WEB_APP_URL__` ภายใน [index.html](index.html)
 
 ## หากต้องการเปลี่ยน URL backend
 
-แก้ค่า `window.__GAS_WEB_APP_URL__` ใน [Index.html](Index.html) ให้เป็น Apps Script Web App URL ตัวใหม่ แล้ว commit/push ขึ้น GitHub อีกครั้ง
+แก้ค่า `window.__GAS_WEB_APP_URL__` ใน [index.html](index.html) ให้เป็น Apps Script Web App URL ตัวใหม่ แล้ว commit/push ขึ้น GitHub อีกครั้ง
 
 ## หมายเหตุ
 

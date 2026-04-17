@@ -36,8 +36,7 @@ jobs:
           rm -rf _site
           mkdir -p _site/.github/workflows
           cp Code.gs _site/Code.gs
-          cp Index.html _site/Index.html
-          cp Index.html _site/index.html
+          cp index.html _site/index.html
           cp README.md _site/README.md
           cp .nojekyll _site/.nojekyll
 
