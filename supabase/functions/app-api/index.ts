@@ -1350,7 +1350,7 @@ const buildSetupConfigSnapshot = (input: unknown) => {
 const normalizeImportedLoanRow = (loan: Record<string, unknown>) => {
   const nowIso = new Date().toISOString();
   const contractNo = normalizeText(
-    loan.contract || loan.contractNo || loan["เลขที่สัญญา"],
+    loan.contract_no || loan.contract || loan.contractNo || loan["เลขที่สัญญา"],
   );
   if (!contractNo) return null;
   return {
