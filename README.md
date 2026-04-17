@@ -20,6 +20,7 @@ Supabase project เริ่มต้นที่ตั้งไว้ในร
 - ฝั่ง backend อยู่ที่ [Code.gs](Code.gs)
 - scaffold สำหรับ Supabase backend อยู่ที่ [supabase/functions/app-api/index.ts](supabase/functions/app-api/index.ts)
 - runbook การย้ายระบบอยู่ที่ [docs/supabase-backend-migration.md](docs/supabase-backend-migration.md)
+- คู่มือ deploy Edge Function อยู่ที่ [docs/supabase-edge-function-deploy.md](docs/supabase-edge-function-deploy.md)
 
 ## วิธีทำงาน
 
@@ -40,3 +41,7 @@ Supabase project เริ่มต้นที่ตั้งไว้ในร
 - หาก GitHub Pages ยังไม่ขึ้นทันที ให้รอ workflow deploy ทำงานให้เสร็จก่อน
 - หาก backend ใหม่ยังไม่ implement method ครบ หน้าเว็บจะเรียกได้เฉพาะ route ที่ Edge Function รองรับแล้ว
 - หากต้องการใช้งานต่อในช่วงเปลี่ยนผ่าน ยังสามารถชี้กลับไปยัง GAS fallback ได้
+
+## Deploy Supabase Edge Function
+
+ใช้คู่มือพร้อมคำสั่งจริงที่ [docs/supabase-edge-function-deploy.md](docs/supabase-edge-function-deploy.md)

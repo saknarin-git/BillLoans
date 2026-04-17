@@ -70,6 +70,10 @@
 - `APP_SESSION_SIGNING_SECRET`
 - `APP_LOGIN_REQUIRED`
 
+## Deploy ใช้งานจริง
+
+คู่มือ deploy พร้อมคำสั่ง PowerShell, การตั้ง secrets, และขั้นทดสอบหลัง deploy อยู่ที่ [docs/supabase-edge-function-deploy.md](../docs/supabase-edge-function-deploy.md)
+
 ## จุดที่ยังต้องทำต่อ
 
 - implement handler จริงใน Edge Function แทน scaffold
