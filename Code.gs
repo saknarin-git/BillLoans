@@ -8219,6 +8219,14 @@ function setupSupabaseDatabase_(config, seedPayload) {
     provider: 'supabase',
     schema: resolved.schema,
     imported: imported,
+    seedCounts: {
+      loans: (edgePayload.loans || []).length,
+      members: (edgePayload.members || []).length,
+      transactions: (edgePayload.transactions || []).length,
+      users: (edgePayload.users || []).length,
+      auditLogs: (edgePayload.auditLogs || []).length,
+      counters: (edgePayload.counters || []).length
+    },
     tables: schemaStatus.tables,
     missingTables: schemaStatus.missingTables,
     message: (edgeResult && edgeResult.message) || 'สร้างโครงสร้าง Supabase และนำเข้าข้อมูลหลักเรียบร้อยแล้ว'
