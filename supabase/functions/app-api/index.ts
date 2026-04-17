@@ -1845,7 +1845,14 @@ const setupDatabase = async (payload: RpcPayload) => {
     : [];
   const importedSettings = buildImportedSettingsRows(setupPayload);
 
-  if (!importedUsers.length) {
+  const existingAdminRows = await callSupabase("app_users", {
+    select: "username",
+    username: "eq.admin",
+    limit: "1",
+  });
+  const hasExistingAdmin = existingAdminRows.length > 0;
+
+  if (!importedUsers.length && !hasExistingAdmin) {
     importedUsers.push(await buildDefaultImportedAdminUser());
   }
 
@@ -1862,7 +1869,7 @@ const setupDatabase = async (payload: RpcPayload) => {
     settings: await upsertSupabaseBatch("app_settings", importedSettings, [
       "key",
     ]),
-    users: await upsertSupabaseBatch("app_users", importedUsers, ["user_id"]),
+    users: await upsertSupabaseBatch("app_users", importedUsers, ["username"]),
     auditLogs: await insertSupabaseBatch("audit_logs", importedAuditLogs),
     counters: await upsertSupabaseBatch("app_counters", importedCounters, [
       "counter_key",
