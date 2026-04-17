@@ -304,7 +304,8 @@ const getUserAdminList = async (payload: RpcPayload) => {
   requirePermission(session, "users.manage", "ไม่มีสิทธิ์จัดการผู้ใช้งาน");
 
   const rows = await callSupabase("app_users", {
-    select: "user_id,username,full_name,email,prefix,first_name,last_name,email_verified_at_text,role,status,created_at_text,updated_at_text,last_login_at_text,permissions_json",
+    select:
+      "user_id,username,full_name,email,prefix,first_name,last_name,email_verified_at_text,role,status,created_at_text,updated_at_text,last_login_at_text,permissions_json",
     order: "username.asc",
     limit: "5000",
   });
@@ -347,11 +348,14 @@ const getAuditLogs = async (payload: RpcPayload) => {
   requirePermission(session, "audit.view", "ไม่มีสิทธิ์ดู Audit Logs");
 
   const rawArg = payload.args?.[0];
-  const filter = typeof rawArg === "string" ? normalizeSettingsInputObject(JSON.parse(rawArg || "{}")) : normalizeSettingsInputObject(rawArg);
+  const filter = typeof rawArg === "string"
+    ? normalizeSettingsInputObject(JSON.parse(rawArg || "{}"))
+    : normalizeSettingsInputObject(rawArg);
   const limit = Math.max(1, Math.min(500, Number(filter.limit) || 150));
 
   const rows = await callSupabase("audit_logs", {
-    select: "occurred_at_text,username,display_name,role,action,entity_type,entity_id,reference_no,before_json,after_json,reason,details,log_id",
+    select:
+      "occurred_at_text,username,display_name,role,action,entity_type,entity_id,reference_no,before_json,after_json,reason,details,log_id",
     order: "log_id.desc",
     limit: String(Math.min(Math.max(limit, 150), 500)),
   });
@@ -369,7 +373,9 @@ const getAuditLogs = async (payload: RpcPayload) => {
     afterJson: normalizeText(row.after_json),
     reason: normalizeText(row.reason),
     details: normalizeText(row.details),
-  })).filter((record) => record.timestamp || record.action || record.entityId || record.details);
+  })).filter((record) => {
+    return record.timestamp || record.action || record.entityId || record.details;
+  });
 
   return { records: records.slice(0, limit) } as JsonObject;
 };
@@ -2505,28 +2511,42 @@ const handlers: Record<string, (payload: RpcPayload) => Promise<Response>> = {
     try {
       return success(await deleteLoan(payload));
     } catch (error) {
-      return appError((error as Error)?.message || "ไม่สามารถลบสัญญาเงินกู้ได้", "DELETE_LOAN_FAILED");
+      return appError(
+        (error as Error)?.message || "ไม่สามารถลบสัญญาเงินกู้ได้",
+        "DELETE_LOAN_FAILED",
+      );
     }
   },
   async getNotificationSettings(payload) {
     try {
       return success(await getNotificationSettings(payload));
     } catch (error) {
-      return appError((error as Error)?.message || "โหลดการตั้งค่าการแจ้งเตือนไม่สำเร็จ", "GET_NOTIFICATION_SETTINGS_FAILED");
+      return appError(
+        (error as Error)?.message || "โหลดการตั้งค่าการแจ้งเตือนไม่สำเร็จ",
+        "GET_NOTIFICATION_SETTINGS_FAILED",
+      );
     }
   },
   async getUserAdminList(payload) {
     try {
       return success(await getUserAdminList(payload));
     } catch (error) {
-      return appError((error as Error)?.message || "โหลดข้อมูลผู้ใช้ไม่สำเร็จ", "GET_USER_ADMIN_LIST_FAILED", { users: [] });
+      return appError(
+        (error as Error)?.message || "โหลดข้อมูลผู้ใช้ไม่สำเร็จ",
+        "GET_USER_ADMIN_LIST_FAILED",
+        { users: [] },
+      );
     }
   },
   async getAuditLogs(payload) {
     try {
       return success(await getAuditLogs(payload));
     } catch (error) {
-      return appError((error as Error)?.message || "โหลด Audit Logs ไม่สำเร็จ", "GET_AUDIT_LOGS_FAILED", { records: [] });
+      return appError(
+        (error as Error)?.message || "โหลด Audit Logs ไม่สำเร็จ",
+        "GET_AUDIT_LOGS_FAILED",
+        { records: [] },
+      );
     }
   },
   async saveSettings(payload) {
