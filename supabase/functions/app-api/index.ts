@@ -918,9 +918,10 @@ const upsertSupabaseBatch = async (
   onConflictColumns: string[] = [],
 ) => {
   if (!rows.length) return 0;
-  const query = onConflictColumns.length
-    ? { on_conflict: onConflictColumns.join(",") }
-    : {};
+  const query: Record<string, string> = {};
+  if (onConflictColumns.length) {
+    query.on_conflict = onConflictColumns.join(",");
+  }
   await callSupabaseRequest("POST", tableName, query, rows, {
     Prefer: "resolution=merge-duplicates,return=minimal",
   });
