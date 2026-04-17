@@ -889,7 +889,9 @@ const callSupabaseRequest = async (
     );
   }
   if (response.status === 204) return [];
-  const data = await response.json();
+  const rawText = await response.text();
+  if (!normalizeText(rawText)) return [];
+  const data = JSON.parse(rawText);
   return Array.isArray(data) ? (data as SupabaseRow[]) : [];
 };
 
