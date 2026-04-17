@@ -5,7 +5,7 @@
 var DEFAULT_SUPABASE_URL = 'https://fdtjomvkmpohdgdfbzst.supabase.co';
 var DEFAULT_SUPABASE_PROJECT_REF = 'fdtjomvkmpohdgdfbzst';
 var GOOGLE_SHEETS_DB_ID = String(PropertiesService.getScriptProperties().getProperty('GOOGLE_SHEETS_DB_ID') || '').trim();
-var DATABASE_PROVIDER = String(PropertiesService.getScriptProperties().getProperty('DATABASE_PROVIDER') || 'sheets').trim().toLowerCase() || 'sheets';
+var DATABASE_PROVIDER = String(PropertiesService.getScriptProperties().getProperty('DATABASE_PROVIDER') || 'supabase').trim().toLowerCase() || 'supabase';
 var SUPABASE_URL = String(PropertiesService.getScriptProperties().getProperty('SUPABASE_URL') || DEFAULT_SUPABASE_URL).trim();
 var SUPABASE_PROJECT_REF = String(PropertiesService.getScriptProperties().getProperty('SUPABASE_PROJECT_REF') || DEFAULT_SUPABASE_PROJECT_REF).trim();
 var SUPABASE_SCHEMA = String(PropertiesService.getScriptProperties().getProperty('SUPABASE_SCHEMA') || 'public').trim() || 'public';
@@ -8228,6 +8228,7 @@ function setupDatabase() {
   var rawPayload = arguments.length > 0 ? arguments[0] : null;
   var setupPayload = parseJsonObjectSafely_(rawPayload);
   var requestedProvider = String((setupPayload && (setupPayload.provider || setupPayload.databaseProvider)) || '').trim().toLowerCase();
+  if (!requestedProvider) requestedProvider = getDatabaseProvider_();
 
   if (requestedProvider === 'supabase' || (setupPayload && setupPayload.config && (setupPayload.config.url || setupPayload.config.projectRef || setupPayload.config.managementToken))) {
     return setupSupabaseDatabase_(setupPayload.config || setupPayload.supabase || setupPayload, setupPayload);
