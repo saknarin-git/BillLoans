@@ -2826,7 +2826,13 @@
         "staff.portal.access"
       ]
     };
-    const [isAuthenticated, setIsAuthenticated] = useState(true);
+    const [isAuthenticated, setIsAuthenticated] = useState(() => {
+      try {
+        return String(sessionStorage.getItem("isAuthenticated") || "").trim().toLowerCase() === "true";
+      } catch (error) {
+        return false;
+      }
+    });
     const [activeTab, setActiveTab] = useState(() => {
       const savedTab = sessionStorage.getItem("activeTab");
       if (savedTab === "settings" || savedTab === "profile") return "payments";
@@ -2986,9 +2992,10 @@
     const [staffPortalNotice, setStaffPortalNotice] = useState({ type: "idle", message: "" });
     const [isOnline, setIsOnline] = useState(() => typeof navigator === "undefined" ? true : navigator.onLine !== false);
     const [sessionHealth, setSessionHealth] = useState({ status: "idle", message: "", checkedAt: 0 });
-    const resetClientSession = useCallback((message) => {
+    const resetClientSession = useCallback((message, options = {}) => {
+      const keepAuthenticated = !!options.keepAuthenticated;
       setStoredBackendSessionToken("");
-      setIsAuthenticated(true);
+      setIsAuthenticated(keepAuthenticated);
       setActiveTab("payments");
       setCurrentUsername(DIRECT_ACCESS_CLIENT_PROFILE.username);
       setCurrentUserFullName(DIRECT_ACCESS_CLIENT_PROFILE.fullName);
@@ -3009,6 +3016,18 @@
       setUserAdminBusyId("");
       setAuthView("login");
       setAuthNotice({ type: "idle", message: "" });
+      try {
+        sessionStorage.removeItem("isAuthenticated");
+        sessionStorage.removeItem("activeTab");
+        sessionStorage.removeItem("currentUsername");
+        sessionStorage.removeItem("currentUserFullName");
+        sessionStorage.removeItem("currentUserEmail");
+        sessionStorage.removeItem("currentUserRole");
+        sessionStorage.removeItem("currentUserPermissions");
+        sessionStorage.removeItem("staffPortalUnlocked");
+        sessionStorage.removeItem("staffPortalUnlockedAt");
+      } catch (error) {
+      }
       if (message !== undefined && message !== null) {
         setInitialLoadError(message || null);
       }
@@ -6742,6 +6761,27 @@ const getQuickOverviewToneClass = (tone) => {
       } else {
         setAuthNotice({ type: "error", message: "ไม่สามารถเชื่อมต่อระบบเพื่อเข้าสู่ระบบได้" });
         setIsLoading(false);
+      }
+    };
+    const handleLogout = () => {
+      if (isLoading) return;
+      const finishLogout = (message) => {
+        resetClientSession(null);
+        setInitialLoadError(null);
+        setAuthNotice({ type: "success", message: message || "ออกจากระบบเรียบร้อยแล้ว" });
+      };
+      if (typeof google !== "undefined" && google.script && google.script.run) {
+        setIsLoading(true);
+        google.script.run.withSuccessHandler((response) => {
+          const result = typeof response === "string" ? { status: response } : response || {};
+          finishLogout((result == null ? void 0 : result.message) || "ออกจากระบบเรียบร้อยแล้ว");
+          setIsLoading(false);
+        }).withFailureHandler(() => {
+          finishLogout("ออกจากระบบบนอุปกรณ์นี้เรียบร้อยแล้ว");
+          setIsLoading(false);
+        }).logoutCurrentSession();
+      } else {
+        finishLogout("ออกจากระบบเรียบร้อยแล้ว");
       }
     };
     const handleRegisterSubmit = (e) => {
@@ -12713,8 +12753,7 @@ const renderPaymentManagementGroup = (group, groupIndex) => /* @__PURE__ */ Reac
       return hQ("div", { className: "ai-qualifications-page space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-7xl mx-auto pb-8" }, [searchWorkspace, resultStage]);
     };
     if (!isAuthenticated) {
-      resetClientSession("");
-      return null;
+      return renderUnauthenticatedView();
     }
     const hP = React.createElement;
     const paymentStickyTotal = (Number(payPrincipal || 0) || 0) + (Number(payInterest || 0) || 0);
@@ -13261,9 +13300,9 @@ const renderPaymentManagementGroup = (group, groupIndex) => /* @__PURE__ */ Reac
         var _a;
         return (_a = searchInputRef.current) == null ? void 0 : _a.focus();
       }, 100);
-    } }) : null, canAccessStaffWorkspace && canViewPaymentRecords ? /* @__PURE__ */ React.createElement(SidebarItem, { icon: /* @__PURE__ */ React.createElement(Layers3, null), label: "จัดการรายการรับชำระ", active: activeTab === "payment_records", onClick: () => setActiveTab("payment_records") }) : null, canAccessStaffWorkspace ? /* @__PURE__ */ React.createElement(SidebarItem, { icon: /* @__PURE__ */ React.createElement(UserCheck, null), label: "ตรวจสอบคุณสมบัติ", active: activeTab === "qualifications", onClick: () => setActiveTab("qualifications") }) : null, canAccessStaffWorkspace && canViewMembers ? /* @__PURE__ */ React.createElement(SidebarItem, { icon: /* @__PURE__ */ React.createElement(Users, null), label: "ทะเบียนสมาชิก", active: activeTab === "members", onClick: () => setActiveTab("members") }) : null, canAccessStaffWorkspace && canViewLoans ? /* @__PURE__ */ React.createElement(SidebarItem, { icon: /* @__PURE__ */ React.createElement(CreditCard, null), label: "จัดการสินเชื่อ", active: activeTab === "loans", onClick: () => setActiveTab("loans") }) : null, canAccessStaffWorkspace && canViewReports ? /* @__PURE__ */ React.createElement(SidebarItem, { icon: /* @__PURE__ */ React.createElement(FileText, null), label: "รายงาน (Reports)", active: activeTab === "reports", onClick: () => setActiveTab("reports") }) : null, /* @__PURE__ */ canAccessStaffWorkspace && canAccessSettingsWorkspace && React.createElement(SidebarItem, { icon: /* @__PURE__ */ React.createElement(Settings, null), label: "DevManager", active: activeTab === "settings", onClick: () => setActiveTab("settings") })), /* @__PURE__ */ React.createElement("div", { className: "p-3 border-t border-slate-800 whitespace-nowrap overflow-hidden" }, /* @__PURE__ */ React.createElement("button", { onClick: () => {
+    } }) : null, canAccessStaffWorkspace && canViewPaymentRecords ? /* @__PURE__ */ React.createElement(SidebarItem, { icon: /* @__PURE__ */ React.createElement(Layers3, null), label: "จัดการรายการรับชำระ", active: activeTab === "payment_records", onClick: () => setActiveTab("payment_records") }) : null, canAccessStaffWorkspace ? /* @__PURE__ */ React.createElement(SidebarItem, { icon: /* @__PURE__ */ React.createElement(UserCheck, null), label: "ตรวจสอบคุณสมบัติ", active: activeTab === "qualifications", onClick: () => setActiveTab("qualifications") }) : null, canAccessStaffWorkspace && canViewMembers ? /* @__PURE__ */ React.createElement(SidebarItem, { icon: /* @__PURE__ */ React.createElement(Users, null), label: "ทะเบียนสมาชิก", active: activeTab === "members", onClick: () => setActiveTab("members") }) : null, canAccessStaffWorkspace && canViewLoans ? /* @__PURE__ */ React.createElement(SidebarItem, { icon: /* @__PURE__ */ React.createElement(CreditCard, null), label: "จัดการสินเชื่อ", active: activeTab === "loans", onClick: () => setActiveTab("loans") }) : null, canAccessStaffWorkspace && canViewReports ? /* @__PURE__ */ React.createElement(SidebarItem, { icon: /* @__PURE__ */ React.createElement(FileText, null), label: "รายงาน (Reports)", active: activeTab === "reports", onClick: () => setActiveTab("reports") }) : null, /* @__PURE__ */ canAccessStaffWorkspace && canAccessSettingsWorkspace && React.createElement(SidebarItem, { icon: /* @__PURE__ */ React.createElement(Settings, null), label: "DevManager", active: activeTab === "settings", onClick: () => setActiveTab("settings") })), /* @__PURE__ */ React.createElement("div", { className: "p-3 border-t border-slate-800 whitespace-nowrap overflow-hidden" }, [/* @__PURE__ */ React.createElement("button", { key: "refresh", onClick: () => {
       refreshRuntimeData({ forceReload: true }).catch(() => {});
-    }, className: "ai-sidebar-logout w-full flex items-center px-2 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors" }, /* @__PURE__ */ React.createElement(RefreshCw, { className: "w-6 h-6 shrink-0" }), /* @__PURE__ */ React.createElement("span", { className: "ml-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 delay-100" }, "รีเฟรชข้อมูล")))), /* @__PURE__ */ React.createElement("main", { className: "ai-main-shell ml-[4.5rem] flex-1 flex flex-col min-h-screen relative w-full" }, /* @__PURE__ */ React.createElement("header", { className: "ai-topbar no-print bg-white h-16 shadow-sm flex items-center justify-between px-8 sticky top-0 z-0" }, /* @__PURE__ */ React.createElement("h2", { className: `transition-all ${activeTab === "payments" ? "text-2xl font-black tracking-tight text-blue-700" : "text-xl font-semibold text-slate-800"}` }, activeTab === "dashboard" && "ภาพรวมระบบ (Executive Dashboard)", activeTab === "payments" && "รับชำระเงิน (Payments)", activeTab === "payment_records" && "จัดการรายการรับชำระ", activeTab === "qualifications" && "ตรวจสอบคุณสมบัติผู้กู้และผู้ค้ำประกัน", activeTab === "members" && "ทะเบียนสมาชิกกลุ่มออมทรัพย์", activeTab === "loans" && "ระบบพิจารณาและจัดการสินเชื่อ", activeTab === "reports" && "รายงานและการวิเคราะห์", false && "หน้าหลักระบบ", activeTab === "settings" && "การตั้งค่าและฐานข้อมูล")), /* @__PURE__ */ React.createElement("div", { className: `ai-content ${activeTab === "payments" ? "ai-content-payments p-3 overflow-hidden" : "p-8 overflow-auto"} flex-1 relative` }, activeTab === "qualifications" && renderQualificationsView(), activeTab === "payments" && renderPaymentsFocusView(), activeTab === "dashboard" && /* @__PURE__ */ React.createElement("div", { className: "ai-dashboard-page space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500" }, /* @__PURE__ */ React.createElement("div", { className: "ai-dashboard-overview-grid grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-5" }, /* @__PURE__ */ React.createElement(StatCard, { title: "ยอดเงินกู้ทั้งหมด", value: formatCurrency(stats.totalLoanAmount), icon: /* @__PURE__ */ React.createElement(TrendingUp, null), color: "bg-blue-50 text-blue-700" }), /* @__PURE__ */ React.createElement(StatCard, { title: "ยอดสินเชื่อคงค้าง", value: formatCurrency(stats.activeLoans), icon: /* @__PURE__ */ React.createElement(CreditCard, null), color: "bg-emerald-50 text-emerald-700" }), /* @__PURE__ */ React.createElement(StatCard, { title: "จำนวนสมาชิกทั้งหมด", value: `${stats.totalMembers} คน`, icon: /* @__PURE__ */ React.createElement(Users, null), color: "bg-indigo-50 text-indigo-700" }), /* @__PURE__ */ React.createElement(StatCard, { title: "หนี้ไม่ก่อให้เกิดรายได้ (NPL)", value: `${stats.nplRatio}%`, icon: /* @__PURE__ */ React.createElement(AlertCircle, null), color: "bg-red-50 text-red-700" })), renderExecutiveDashboardPanel(), /* @__PURE__ */ React.createElement("div", { className: "ai-dashboard-approval-panel bg-white rounded-[1.75rem] shadow-sm border border-slate-200 overflow-hidden" }, /* @__PURE__ */ React.createElement("div", { className: "px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center" }, /* @__PURE__ */ React.createElement("h3", { className: "font-semibold text-slate-800 flex items-center" }, "รายการสินเชื่อรออนุมัติ / รอตรวจสอบ", /* @__PURE__ */ React.createElement("span", { className: "ml-2 bg-orange-100 text-orange-700 py-0.5 px-2 rounded-full text-xs font-bold" }, stats.pendingApprovalCount, " รายการ"))), /* @__PURE__ */ React.createElement("div", { className: "p-0 overflow-x-auto" }, /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-sm text-slate-600 min-w-[800px]" }, /* @__PURE__ */ React.createElement("thead", { className: "bg-white text-slate-500 border-b border-slate-200" }, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { className: "px-6 py-3 font-medium" }, "รหัสสมาชิก"), /* @__PURE__ */ React.createElement("th", { className: "px-6 py-3 font-medium" }, "เลขที่สัญญา"), /* @__PURE__ */ React.createElement("th", { className: "px-6 py-3 font-medium" }, "ผู้กู้"), /* @__PURE__ */ React.createElement("th", { className: "px-6 py-3 font-medium" }, "ยอดขอกู้"), /* @__PURE__ */ React.createElement("th", { className: "px-6 py-3 font-medium text-right" }, "จัดการ"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-100" }, pendingApprovalLoans.map((loan, idx) => /* @__PURE__ */ React.createElement("tr", { key: idx, className: "hover:bg-slate-50 transition-colors" }, /* @__PURE__ */ React.createElement("td", { className: "px-6 py-4 font-medium text-slate-500" }, loan.memberId), /* @__PURE__ */ React.createElement("td", { className: "px-6 py-4 font-medium text-slate-800" }, loan.contract), /* @__PURE__ */ React.createElement("td", { className: "px-6 py-4" }, loan.member), /* @__PURE__ */ React.createElement("td", { className: "px-6 py-4 font-medium text-emerald-700" }, formatCurrency(loan.amount)), /* @__PURE__ */ React.createElement("td", { className: "px-6 py-4 text-right" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-end space-x-3" }, /* @__PURE__ */ React.createElement(
+    }, className: "ai-sidebar-logout w-full flex items-center px-2 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors" }, /* @__PURE__ */ React.createElement(RefreshCw, { className: "w-6 h-6 shrink-0" }), /* @__PURE__ */ React.createElement("span", { className: "ml-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 delay-100" }, "รีเฟรชข้อมูล")), /* @__PURE__ */ React.createElement("button", { key: "logout", onClick: handleLogout, className: "ai-sidebar-logout mt-2 w-full flex items-center px-2 py-2 rounded-lg text-rose-300 hover:text-white hover:bg-rose-700/60 transition-colors" }, /* @__PURE__ */ React.createElement(LogOut, { className: "w-6 h-6 shrink-0" }), /* @__PURE__ */ React.createElement("span", { className: "ml-3 opacity-0 group-hover:opacity-100 transition-opacity duration-300 delay-100" }, "ออกจากระบบ"))]), /* @__PURE__ */ React.createElement("main", { className: "ai-main-shell ml-[4.5rem] flex-1 flex flex-col min-h-screen relative w-full" }, /* @__PURE__ */ React.createElement("header", { className: "ai-topbar no-print bg-white h-16 shadow-sm flex items-center justify-between px-8 sticky top-0 z-0" }, /* @__PURE__ */ React.createElement("h2", { className: `transition-all ${activeTab === "payments" ? "text-2xl font-black tracking-tight text-blue-700" : "text-xl font-semibold text-slate-800"}` }, activeTab === "dashboard" && "ภาพรวมระบบ (Executive Dashboard)", activeTab === "payments" && "รับชำระเงิน (Payments)", activeTab === "payment_records" && "จัดการรายการรับชำระ", activeTab === "qualifications" && "ตรวจสอบคุณสมบัติผู้กู้และผู้ค้ำประกัน", activeTab === "members" && "ทะเบียนสมาชิกกลุ่มออมทรัพย์", activeTab === "loans" && "ระบบพิจารณาและจัดการสินเชื่อ", activeTab === "reports" && "รายงานและการวิเคราะห์", false && "หน้าหลักระบบ", activeTab === "settings" && "การตั้งค่าและฐานข้อมูล")), /* @__PURE__ */ React.createElement("div", { className: `ai-content ${activeTab === "payments" ? "ai-content-payments p-3 overflow-hidden" : "p-8 overflow-auto"} flex-1 relative` }, activeTab === "qualifications" && renderQualificationsView(), activeTab === "payments" && renderPaymentsFocusView(), activeTab === "dashboard" && /* @__PURE__ */ React.createElement("div", { className: "ai-dashboard-page space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500" }, /* @__PURE__ */ React.createElement("div", { className: "ai-dashboard-overview-grid grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-4 gap-5" }, /* @__PURE__ */ React.createElement(StatCard, { title: "ยอดเงินกู้ทั้งหมด", value: formatCurrency(stats.totalLoanAmount), icon: /* @__PURE__ */ React.createElement(TrendingUp, null), color: "bg-blue-50 text-blue-700" }), /* @__PURE__ */ React.createElement(StatCard, { title: "ยอดสินเชื่อคงค้าง", value: formatCurrency(stats.activeLoans), icon: /* @__PURE__ */ React.createElement(CreditCard, null), color: "bg-emerald-50 text-emerald-700" }), /* @__PURE__ */ React.createElement(StatCard, { title: "จำนวนสมาชิกทั้งหมด", value: `${stats.totalMembers} คน`, icon: /* @__PURE__ */ React.createElement(Users, null), color: "bg-indigo-50 text-indigo-700" }), /* @__PURE__ */ React.createElement(StatCard, { title: "หนี้ไม่ก่อให้เกิดรายได้ (NPL)", value: `${stats.nplRatio}%`, icon: /* @__PURE__ */ React.createElement(AlertCircle, null), color: "bg-red-50 text-red-700" })), renderExecutiveDashboardPanel(), /* @__PURE__ */ React.createElement("div", { className: "ai-dashboard-approval-panel bg-white rounded-[1.75rem] shadow-sm border border-slate-200 overflow-hidden" }, /* @__PURE__ */ React.createElement("div", { className: "px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center" }, /* @__PURE__ */ React.createElement("h3", { className: "font-semibold text-slate-800 flex items-center" }, "รายการสินเชื่อรออนุมัติ / รอตรวจสอบ", /* @__PURE__ */ React.createElement("span", { className: "ml-2 bg-orange-100 text-orange-700 py-0.5 px-2 rounded-full text-xs font-bold" }, stats.pendingApprovalCount, " รายการ"))), /* @__PURE__ */ React.createElement("div", { className: "p-0 overflow-x-auto" }, /* @__PURE__ */ React.createElement("table", { className: "w-full text-left text-sm text-slate-600 min-w-[800px]" }, /* @__PURE__ */ React.createElement("thead", { className: "bg-white text-slate-500 border-b border-slate-200" }, /* @__PURE__ */ React.createElement("tr", null, /* @__PURE__ */ React.createElement("th", { className: "px-6 py-3 font-medium" }, "รหัสสมาชิก"), /* @__PURE__ */ React.createElement("th", { className: "px-6 py-3 font-medium" }, "เลขที่สัญญา"), /* @__PURE__ */ React.createElement("th", { className: "px-6 py-3 font-medium" }, "ผู้กู้"), /* @__PURE__ */ React.createElement("th", { className: "px-6 py-3 font-medium" }, "ยอดขอกู้"), /* @__PURE__ */ React.createElement("th", { className: "px-6 py-3 font-medium text-right" }, "จัดการ"))), /* @__PURE__ */ React.createElement("tbody", { className: "divide-y divide-slate-100" }, pendingApprovalLoans.map((loan, idx) => /* @__PURE__ */ React.createElement("tr", { key: idx, className: "hover:bg-slate-50 transition-colors" }, /* @__PURE__ */ React.createElement("td", { className: "px-6 py-4 font-medium text-slate-500" }, loan.memberId), /* @__PURE__ */ React.createElement("td", { className: "px-6 py-4 font-medium text-slate-800" }, loan.contract), /* @__PURE__ */ React.createElement("td", { className: "px-6 py-4" }, loan.member), /* @__PURE__ */ React.createElement("td", { className: "px-6 py-4 font-medium text-emerald-700" }, formatCurrency(loan.amount)), /* @__PURE__ */ React.createElement("td", { className: "px-6 py-4 text-right" }, /* @__PURE__ */ React.createElement("div", { className: "flex items-center justify-end space-x-3" }, /* @__PURE__ */ React.createElement(
       "button",
       {
         onClick: () => handleApproveLoan(loan.contract),
