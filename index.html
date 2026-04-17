@@ -903,12 +903,19 @@
       opacity: 1;
       transform: translateX(0) scale(1);
     }
+    const DEFAULT_SUPABASE_URL = "https://fdtjomvkmpohdgdfbzst.supabase.co";
+    const DEFAULT_SUPABASE_PROJECT_REF = "fdtjomvkmpohdgdfbzst";
+    const deriveSupabaseProjectRefFromUrl = (value) => {
+      const normalized = String(value || "").trim().replace(/\/$/, "");
+      const match = normalized.match(/^https:\/\/([a-z0-9-]+)\.supabase\.co$/i);
+      return match ? String(match[1] || "").trim() : "";
+    };
   }
 
   @keyframes settingsCardPulse {
     0% {
       box-shadow: 0 0 0 0 rgba(15, 118, 110, 0.24), 0 16px 35px -22px rgba(15, 23, 42, 0.6);
-    }
+    const [supabaseSetupConfig, setSupabaseSetupConfig] = useState(() => ({ url: DEFAULT_SUPABASE_URL, projectRef: DEFAULT_SUPABASE_PROJECT_REF, schema: "public", serviceRoleKey: "", managementToken: "" }));
     100% {
       box-shadow: 0 0 0 10px rgba(15, 118, 110, 0), 0 16px 35px -22px rgba(15, 23, 42, 0.6);
     }
@@ -2394,64 +2401,74 @@
 <script>
 (() => {
   const __bootStartedAt = Date.now();
+  window.__BACKEND_API_URL__ = "https://fdtjomvkmpohdgdfbzst.functions.supabase.co/app-api";
   window.__GAS_WEB_APP_URL__ = "https://script.google.com/macros/s/AKfycbzsXcsljlezOtlzw9IXtRd95LmLmOaHkEVThV_xvDI5BgiGKibkKC_Pt3RDZJ7jHP4hsw/exec";
-  const GAS_WEB_APP_URL_STORAGE_KEY = "gasWebAppUrl";
-  const GAS_SESSION_TOKEN_STORAGE_KEY = "gasSessionToken";
-  let cachedGasWebAppUrl = "";
-  const normalizeGasWebAppUrl = (value) => String(value || "").trim();
-  const persistGasWebAppUrl = (url) => {
-    const normalizedUrl = normalizeGasWebAppUrl(url);
-    cachedGasWebAppUrl = normalizedUrl;
+  const BACKEND_API_URL_STORAGE_KEY = "backendApiUrl";
+  const GAS_WEB_APP_URL_STORAGE_KEY = BACKEND_API_URL_STORAGE_KEY;
+  const BACKEND_SESSION_TOKEN_STORAGE_KEY = "backendSessionToken";
+  const GAS_SESSION_TOKEN_STORAGE_KEY = BACKEND_SESSION_TOKEN_STORAGE_KEY;
+  let cachedBackendApiUrl = "";
+  const normalizeBackendApiUrl = (value) => String(value || "").trim();
+  const persistBackendApiUrl = (url) => {
+    const normalizedUrl = normalizeBackendApiUrl(url);
+    cachedBackendApiUrl = normalizedUrl;
     try {
       if (normalizedUrl) {
-        localStorage.setItem(GAS_WEB_APP_URL_STORAGE_KEY, normalizedUrl);
+        localStorage.setItem(BACKEND_API_URL_STORAGE_KEY, normalizedUrl);
       }
     } catch (_) {}
     return normalizedUrl;
   };
-  const getConfiguredGasWebAppUrl = () => {
-    if (cachedGasWebAppUrl) return cachedGasWebAppUrl;
+  const getConfiguredBackendApiUrl = () => {
+    if (cachedBackendApiUrl) return cachedBackendApiUrl;
     try {
       const searchParams = new URLSearchParams(window.location.search || "");
+      const fromBackendQuery = searchParams.get("backend_url") || searchParams.get("backendUrl") || searchParams.get("api_url") || searchParams.get("apiUrl") || "";
+      if (fromBackendQuery) return persistBackendApiUrl(fromBackendQuery);
       const fromQuery = searchParams.get("gas_url") || searchParams.get("gasUrl") || "";
-      if (fromQuery) return persistGasWebAppUrl(fromQuery);
+      if (fromQuery) return persistBackendApiUrl(fromQuery);
     } catch (_) {}
 
     try {
-      const fromStorage = normalizeGasWebAppUrl(localStorage.getItem(GAS_WEB_APP_URL_STORAGE_KEY) || "");
-      if (fromStorage) return persistGasWebAppUrl(fromStorage);
+      const fromStorage = normalizeBackendApiUrl(localStorage.getItem(BACKEND_API_URL_STORAGE_KEY) || "");
+      if (fromStorage) return persistBackendApiUrl(fromStorage);
     } catch (_) {}
 
-    const fromWindow = normalizeGasWebAppUrl((window.APP_CONFIG && window.APP_CONFIG.gasWebAppUrl) || window.__GAS_WEB_APP_URL__ || "");
-    if (fromWindow) return persistGasWebAppUrl(fromWindow);
+    const fromWindow = normalizeBackendApiUrl(
+      (window.APP_CONFIG && (window.APP_CONFIG.backendApiUrl || window.APP_CONFIG.gasWebAppUrl))
+      || window.__BACKEND_API_URL__
+      || window.__GAS_WEB_APP_URL__
+      || ""
+    );
+    if (fromWindow) return persistBackendApiUrl(fromWindow);
 
     return "";
   };
-  const getStoredGasSessionToken = () => {
+  const getStoredBackendSessionToken = () => {
     try {
-      return String(sessionStorage.getItem(GAS_SESSION_TOKEN_STORAGE_KEY) || "").trim();
+      return String(sessionStorage.getItem(BACKEND_SESSION_TOKEN_STORAGE_KEY) || "").trim();
     } catch (_) {
       return "";
     }
   };
-  const setStoredGasSessionToken = (token) => {
+  const setStoredBackendSessionToken = (token) => {
     const normalizedToken = String(token || "").trim();
     try {
       if (normalizedToken) {
-        sessionStorage.setItem(GAS_SESSION_TOKEN_STORAGE_KEY, normalizedToken);
+        sessionStorage.setItem(BACKEND_SESSION_TOKEN_STORAGE_KEY, normalizedToken);
       } else {
-        sessionStorage.removeItem(GAS_SESSION_TOKEN_STORAGE_KEY);
+        sessionStorage.removeItem(BACKEND_SESSION_TOKEN_STORAGE_KEY);
       }
     } catch (_) {}
     return normalizedToken;
   };
-  const syncGasSessionTokenFromResponse = (response) => {
+  const syncBackendSessionTokenFromResponse = (response) => {
     if (!response || typeof response !== "object") return response;
     if (typeof response.sessionToken === "string" && response.sessionToken.trim()) {
-      setStoredGasSessionToken(response.sessionToken.trim());
+      setStoredBackendSessionToken(response.sessionToken.trim());
     }
     if (response.clearSessionToken) {
-      setStoredGasSessionToken("");
+      setStoredBackendSessionToken("");
     }
     return response;
   };
@@ -2463,13 +2480,15 @@
       sessionStorage.setItem(key, normalizedValue);
     } catch (_) {}
   };
-  window.setGasWebAppUrl = (url) => persistGasWebAppUrl(url);
-  window.getGasWebAppUrl = () => getConfiguredGasWebAppUrl();
+  window.setBackendApiUrl = (url) => persistBackendApiUrl(url);
+  window.getBackendApiUrl = () => getConfiguredBackendApiUrl();
+  window.setGasWebAppUrl = window.setBackendApiUrl;
+  window.getGasWebAppUrl = window.getBackendApiUrl;
 
   const invokeRemoteBackendMethod = async (methodName, args = [], options = {}) => {
-    const endpoint = getConfiguredGasWebAppUrl();
+    const endpoint = getConfiguredBackendApiUrl();
     if (!endpoint) {
-      throw new Error("ยังไม่ได้ตั้งค่า URL ของ GAS Web App สำหรับหน้า GitHub Pages");
+      throw new Error("ยังไม่ได้ตั้งค่า URL ของ backend API สำหรับหน้าเว็บ");
     }
 
     const response = await fetch(endpoint, {
@@ -2481,7 +2500,7 @@
       body: JSON.stringify({
         method: String(methodName || "").trim(),
         args: Array.isArray(args) ? args : [],
-        sessionToken: getStoredGasSessionToken()
+        sessionToken: getStoredBackendSessionToken()
       })
     });
 
@@ -2490,18 +2509,23 @@
     const looksLikeHtml = /^<!doctype html/i.test(normalizedRawText) || /^<html/i.test(normalizedRawText);
 
     if (!response.ok || looksLikeHtml) {
-      const defaultUrl = normalizeGasWebAppUrl((window.APP_CONFIG && window.APP_CONFIG.gasWebAppUrl) || window.__GAS_WEB_APP_URL__ || "");
+      const defaultUrl = normalizeBackendApiUrl(
+        (window.APP_CONFIG && (window.APP_CONFIG.backendApiUrl || window.APP_CONFIG.gasWebAppUrl))
+        || window.__BACKEND_API_URL__
+        || window.__GAS_WEB_APP_URL__
+        || ""
+      );
       if (!options.retryingWithDefault && defaultUrl && endpoint !== defaultUrl) {
-        persistGasWebAppUrl(defaultUrl);
+        persistBackendApiUrl(defaultUrl);
         return invokeRemoteBackendMethod(methodName, args, { retryingWithDefault: true });
       }
       if (response.status === 401 || response.status === 403) {
-        throw new Error("GAS Web App ยังไม่ได้เปิดสิทธิ์ให้ใช้งาน กรุณาตั้งค่า deployment ให้เข้าถึงได้");
+        throw new Error("backend API ยังไม่ได้เปิดสิทธิ์ให้ใช้งาน กรุณาตรวจสอบ deployment และสิทธิ์การเข้าถึง");
       }
       if (response.status === 404 || normalizedRawText.indexOf("ไม่สามารถเปิดไฟล์ได้ในเวลานี้") >= 0 || normalizedRawText.indexOf("ไม่พบเพจ") >= 0) {
-        throw new Error("ไม่พบ GAS Web App หรือ deployment ยังไม่เปิดใช้งาน กรุณาตรวจสอบ URL และ redeploy ใหม่");
+        throw new Error("ไม่พบ backend API หรือ deployment ยังไม่เปิดใช้งาน กรุณาตรวจสอบ URL และ redeploy ใหม่");
       }
-      throw new Error("ไม่สามารถเชื่อมต่อ GAS Web App ได้ กรุณาลองใหม่อีกครั้ง");
+      throw new Error("ไม่สามารถเชื่อมต่อ backend API ได้ กรุณาลองใหม่อีกครั้ง");
     }
 
     let parsedResponse = rawText;
@@ -2509,11 +2533,11 @@
       parsedResponse = rawText ? JSON.parse(rawText) : {};
     } catch (_) {}
 
-    syncGasSessionTokenFromResponse(parsedResponse);
+    syncBackendSessionTokenFromResponse(parsedResponse);
 
     const normalizedMessage = String((parsedResponse && parsedResponse.message) || "").toUpperCase();
     if (normalizedMessage.indexOf("UNAUTHORIZED") >= 0 || normalizedMessage.indexOf("เข้าสู่ระบบใหม่") >= 0) {
-      setStoredGasSessionToken("");
+      setStoredBackendSessionToken("");
     }
 
     return parsedResponse;
@@ -2962,7 +2986,7 @@
     const [isOnline, setIsOnline] = useState(() => typeof navigator === "undefined" ? true : navigator.onLine !== false);
     const [sessionHealth, setSessionHealth] = useState({ status: "idle", message: "", checkedAt: 0 });
     const resetClientSession = useCallback((message) => {
-      sessionStorage.removeItem("gasSessionToken");
+      setStoredBackendSessionToken("");
       setIsAuthenticated(true);
       setActiveTab("payments");
       setCurrentUsername(DIRECT_ACCESS_CLIENT_PROFILE.username);
@@ -3193,7 +3217,7 @@
     }, [callBackend]);
     const recoverFromUnauthorizedState = useCallback((message, retryFn) => {
       try {
-        sessionStorage.removeItem("gasSessionToken");
+        setStoredBackendSessionToken("");
       } catch (e) {}
       clearBackendReadCache();
       if (unauthorizedRecoveryPhaseRef.current < 2) {
@@ -3208,7 +3232,7 @@
               try {
                 const parsed = typeof response === "string" ? JSON.parse(response) : response || {};
                 if (parsed.sessionToken) {
-                  try { sessionStorage.setItem("gasSessionToken", parsed.sessionToken); } catch (_) {}
+                  setStoredBackendSessionToken(parsed.sessionToken);
                 }
               } catch (_) {}
               retryFn();
@@ -4878,7 +4902,7 @@ const [cancellingTransactionId, setCancellingTransactionId] = useState("");
         const errorMessage = String((error == null ? void 0 : error.message) || error || "");
         if (errorMessage.indexOf("UNAUTHORIZED") !== -1 || errorMessage.indexOf("เข้าสู่ระบบใหม่") !== -1) {
           try {
-            sessionStorage.removeItem("gasSessionToken");
+            setStoredBackendSessionToken("");
           } catch (e) {}
           clearBackendReadCache(`paymentLookupByMember::${normalizedMemberId}`);
           if (!paymentLookupUnauthorizedRetryRef.current.get(normalizedMemberId)) {
@@ -6649,7 +6673,7 @@ const getQuickOverviewToneClass = (tone) => {
             const normalizedStaffPortalUnlocked = !!(result == null ? void 0 : result.staffPortalUnlocked);
             const normalizedStaffPortalUnlockedAt = String((result == null ? void 0 : result.staffPortalUnlockedAt) || "").trim();
             if (typeof (result == null ? void 0 : result.sessionToken) === "string" && result.sessionToken.trim()) {
-              sessionStorage.setItem("gasSessionToken", result.sessionToken.trim());
+              setStoredBackendSessionToken(result.sessionToken.trim());
             }
             sessionStorage.setItem("activeTab", "profile");
             sessionStorage.setItem("currentUsername", normalizedUsername);
@@ -7926,7 +7950,16 @@ const getQuickOverviewToneClass = (tone) => {
     }, [canManageSettings, menuSettings, normalizeMenuSettingsFrontend, parseBackendResponse, isActiveSettingsWorkspaceItem, canViewAuditLogs, auditLogLoaded, loadAuditLogRows]);
 
     const handleSupabaseSetupConfigChange = (field, value) => {
-      setSupabaseSetupConfig((prev) => ({ ...prev, [field]: value }));
+      setSupabaseSetupConfig((prev) => {
+        const nextConfig = { ...prev, [field]: value };
+        if (field === "url") {
+          const derivedProjectRef = deriveSupabaseProjectRefFromUrl(value);
+          if (derivedProjectRef) {
+            nextConfig.projectRef = derivedProjectRef;
+          }
+        }
+        return nextConfig;
+      });
     };
 
     const handleCheckSupabaseConnection = () => {

@@ -1,0 +1,4 @@
+project_id = "billloans"
+
+[functions.app-api]
+verify_jwt = false

@@ -2,10 +2,12 @@
  * ระบบจัดการเงินกู้ บ้านพิตำ V.3.2 (Full Backend + API)
  */
 
+var DEFAULT_SUPABASE_URL = 'https://fdtjomvkmpohdgdfbzst.supabase.co';
+var DEFAULT_SUPABASE_PROJECT_REF = 'fdtjomvkmpohdgdfbzst';
 var GOOGLE_SHEETS_DB_ID = String(PropertiesService.getScriptProperties().getProperty('GOOGLE_SHEETS_DB_ID') || '').trim();
 var DATABASE_PROVIDER = String(PropertiesService.getScriptProperties().getProperty('DATABASE_PROVIDER') || 'sheets').trim().toLowerCase() || 'sheets';
-var SUPABASE_URL = String(PropertiesService.getScriptProperties().getProperty('SUPABASE_URL') || '').trim();
-var SUPABASE_PROJECT_REF = String(PropertiesService.getScriptProperties().getProperty('SUPABASE_PROJECT_REF') || '').trim();
+var SUPABASE_URL = String(PropertiesService.getScriptProperties().getProperty('SUPABASE_URL') || DEFAULT_SUPABASE_URL).trim();
+var SUPABASE_PROJECT_REF = String(PropertiesService.getScriptProperties().getProperty('SUPABASE_PROJECT_REF') || DEFAULT_SUPABASE_PROJECT_REF).trim();
 var SUPABASE_SCHEMA = String(PropertiesService.getScriptProperties().getProperty('SUPABASE_SCHEMA') || 'public').trim() || 'public';
 var SUPABASE_SERVICE_ROLE_KEY = String(PropertiesService.getScriptProperties().getProperty('SUPABASE_SERVICE_ROLE_KEY') || '').trim();
 var SUPABASE_MANAGEMENT_TOKEN = String(PropertiesService.getScriptProperties().getProperty('SUPABASE_MANAGEMENT_TOKEN') || '').trim();
@@ -15385,4 +15387,995 @@ getLoanDetail = function(contractNo) {
     result.quickOverview = { title: 'สรุปเร็วสัญญา', description: 'ไม่สามารถคำนวณสรุปเร็วได้', cards: [] };
   }
   return result;
+};
+
+// ==========================================
+// PHASE 20: SUPABASE RUNTIME ADAPTER + MIRROR SYNC
+// ==========================================
+function isSupabaseRuntimeEnabled_() {
+  return getDatabaseProvider_() === 'supabase';
+}
+
+function canUseSupabaseRuntime_() {
+  if (!isSupabaseRuntimeEnabled_()) return false;
+  var config = getSupabaseConfig_();
+  return !!(config && config.url && config.serviceRoleKey);
+}
+
+function getSupabaseExecutionSettingsCacheKey_() {
+  return 'supabase::settingsMap';
+}
+
+function invalidateSupabaseRuntimeExecutionCaches_() {
+  delete EXECUTION_SETTINGS_MAP_CACHE_[getSupabaseExecutionSettingsCacheKey_()];
+  EXECUTION_PAYMENT_INTEREST_RATE_CACHE_ = null;
+}
+
+function getSupabaseTableRows_(tableName, queryParams) {
+  var rows = callSupabaseRestApi_(null, 'get', tableName, queryParams || null, null, null);
+  return Array.isArray(rows) ? rows : [];
+}
+
+function deleteSupabaseRowsByFilters_(tableName, filters) {
+  var queryParams = {};
+  var keys = Object.keys(filters || {});
+  for (var i = 0; i < keys.length; i++) {
+    var key = keys[i];
+    var value = filters[key];
+    if (value == null || value === '') continue;
+    queryParams[key] = 'eq.' + String(value).trim();
+  }
+  if (!Object.keys(queryParams).length) return;
+  callSupabaseRestApi_(null, 'delete', tableName, queryParams, null, {
+    Prefer: 'return=minimal'
+  });
+}
+
+function readSheetRowAsObject_(sheet, rowIndex) {
+  if (!sheet || rowIndex <= 1 || sheet.getLastColumn() < 1 || sheet.getLastRow() < rowIndex) return null;
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0] || [];
+  var values = sheet.getRange(rowIndex, 1, 1, sheet.getLastColumn()).getValues()[0] || [];
+  var record = {};
+  var hasValue = false;
+  for (var i = 0; i < headers.length; i++) {
+    var header = String(headers[i] || '').trim();
+    if (!header) continue;
+    record[header] = values[i];
+    if (values[i] !== '' && values[i] != null) hasValue = true;
+  }
+  return hasValue ? record : null;
+}
+
+function mapTransactionValuesToObject_(rowValues) {
+  var row = Array.isArray(rowValues) ? rowValues : [];
+  return {
+    id: String(row[0] || '').trim(),
+    timestamp: String(row[1] || '').trim(),
+    contract: String(row[2] || '').trim(),
+    memberId: String(row[3] || '').trim(),
+    principalPaid: Number(row[4]) || 0,
+    interestPaid: Number(row[5]) || 0,
+    balance: Number(row[6]) || 0,
+    note: String(row[7] || '').trim(),
+    actor: String(row[8] || '').trim(),
+    memberName: String(row[9] || '').trim(),
+    txStatus: String(row[10] || '').trim(),
+    interestMonthsPaid: Number(row[11]) || 0,
+    overdueInterestBefore: Number(row[12]) || 0,
+    overdueInterestAfter: Number(row[13]) || 0
+  };
+}
+
+function normalizeSupabaseSettingValue_(row) {
+  if (!row) return '';
+  if (row.value_json !== null && row.value_json !== undefined) return row.value_json;
+  return row.value_text;
+}
+
+function getSupabaseSettingsMapSnapshot_() {
+  var cacheKey = getSupabaseExecutionSettingsCacheKey_();
+  if (EXECUTION_SETTINGS_MAP_CACHE_.hasOwnProperty(cacheKey)) {
+    return EXECUTION_SETTINGS_MAP_CACHE_[cacheKey];
+  }
+  var rows = getSupabaseTableRows_('app_settings', {
+    select: 'key,value_text,value_json',
+    order: 'key.asc',
+    limit: '5000'
+  });
+  var settingsMap = {};
+  for (var i = 0; i < rows.length; i++) {
+    var key = String((rows[i] && rows[i].key) || '').trim();
+    if (!key) continue;
+    settingsMap[key] = normalizeSupabaseSettingValue_(rows[i]);
+  }
+  EXECUTION_SETTINGS_MAP_CACHE_[cacheKey] = settingsMap;
+  return settingsMap;
+}
+
+function buildRuntimeLoanDataFromSupabaseRow_(row, currentMonthContext) {
+  var source = row || {};
+  var balance = Number(source.outstanding_balance) || 0;
+  var overdueMonths = Math.max(0, Number(source.overdue_months) || 0);
+  return {
+    memberId: String(source.member_id || '').trim(),
+    contract: String(source.contract_no || '').trim(),
+    member: String(source.borrower_name || '').trim(),
+    amount: Number(source.principal_amount) || 0,
+    interest: Number(source.interest_rate) || 0,
+    balance: balance,
+    status: deriveLoanStatusFromState_(balance, overdueMonths, String(source.status || '').trim()),
+    nextPayment: String(source.due_date_text || '').trim(),
+    missedInterestMonths: overdueMonths,
+    reportMissedInterestMonths: overdueMonths,
+    currentMonthRequiredInstallment: 0,
+    currentMonthInterestPaid: false,
+    currentMonthKey: currentMonthContext.monthKey,
+    paidInterestInstallmentsYtd: 0,
+    dueInterestInstallmentsYtd: overdueMonths,
+    maxInterestInstallments: 1,
+    createdAt: normalizeLoanCreatedAt_(source.created_date_text),
+    guarantor1: String(source.guarantor_1 || '').trim(),
+    guarantor2: String(source.guarantor_2 || '').trim()
+  };
+}
+
+function buildRuntimeTransactionDataFromSupabaseRow_(row) {
+  var source = row || {};
+  var timestamp = String(source.occurred_on_text || '').trim();
+  var dateOnly = String(timestamp || '').split(' ')[0] || '';
+  var dateNumber = getThaiDateNumber_(dateOnly);
+  var timeMatch = timestamp.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  var hh = timeMatch ? padNumber_(Number(timeMatch[1]) || 0, 2) : '00';
+  var mm = timeMatch ? padNumber_(Number(timeMatch[2]) || 0, 2) : '00';
+  var ss = timeMatch ? padNumber_(Number(timeMatch[3]) || 0, 2) : '00';
+  return {
+    id: String(source.reference_id || '').trim(),
+    timestamp: timestamp,
+    contract: String(source.contract_no || '').trim(),
+    memberId: String(source.member_id || '').trim(),
+    principalPaid: Number(source.principal_paid) || 0,
+    interestPaid: Number(source.interest_paid) || 0,
+    newBalance: Number(source.outstanding_balance) || 0,
+    note: String(source.note || '').trim(),
+    memberName: String(source.full_name || '').trim(),
+    txStatus: String(source.tx_status || 'ปกติ').trim() || 'ปกติ',
+    interestMonthsPaid: Number(source.interest_months_paid) || 0,
+    missedBeforePayment: Number(source.overdue_interest_before) || 0,
+    missedAfterPayment: Number(source.overdue_interest_after) || 0,
+    _sortKey: String(dateNumber || 0) + hh + mm + ss
+  };
+}
+
+function buildSupabaseRuntimePayload_(sessionData, now, includeMembers) {
+  var asOfDate = now || new Date();
+  var settingsMap = getSupabaseSettingsMapSnapshot_();
+  var currentMonthContext = (function() {
+    var nowParts = parseThaiDateParts_(asOfDate) || { month: asOfDate.getMonth() + 1, yearBe: asOfDate.getFullYear() + 543 };
+    return {
+      month: nowParts.month,
+      yearBe: nowParts.yearBe,
+      monthKey: nowParts.yearBe + '-' + padNumber_(nowParts.month, 2)
+    };
+  })();
+
+  var loanRows = getSupabaseTableRows_('loans', {
+    select: 'contract_no,member_id,borrower_name,principal_amount,interest_rate,outstanding_balance,status,due_date_text,overdue_months,created_date_text,guarantor_1,guarantor_2',
+    order: 'contract_no.asc',
+    limit: '5000'
+  });
+  var loansData = loanRows.map(function(row) {
+    return buildRuntimeLoanDataFromSupabaseRow_(row, currentMonthContext);
+  });
+
+  var membersData = [];
+  if (includeMembers) {
+    var memberRows = getSupabaseTableRows_('members', {
+      select: 'member_id,full_name,status',
+      order: 'member_id.asc',
+      limit: '5000'
+    });
+    membersData = memberRows.map(function(row) {
+      return {
+        id: String(row.member_id || '').trim(),
+        name: String(row.full_name || '').trim(),
+        status: String(row.status || '').trim()
+      };
+    });
+  }
+
+  var transactionRows = getSupabaseTableRows_('transactions', {
+    select: 'reference_id,occurred_on_text,contract_no,member_id,principal_paid,interest_paid,outstanding_balance,note,actor,full_name,tx_status,interest_months_paid,overdue_interest_before,overdue_interest_after',
+    order: 'updated_at.desc',
+    limit: '200'
+  });
+  var transactions = transactionRows
+    .map(buildRuntimeTransactionDataFromSupabaseRow_)
+    .filter(function(tx) {
+      return !isInactiveTransactionStatus_(String(tx.txStatus || '').trim());
+    })
+    .sort(function(a, b) {
+      return String(b._sortKey || '').localeCompare(String(a._sortKey || ''));
+    })
+    .slice(0, 100);
+
+  var currentUserSnapshot = sessionData && sessionData.username ? getUserAuthorizationSnapshot_(sessionData.username) : null;
+  var appData = {
+    status: 'Success',
+    loans: loansData,
+    transactions: transactions,
+    monthlyDashboardCoverCards: [],
+    dashboardSummaryYearBe: currentMonthContext.yearBe,
+    dashboardOverviewStats: buildDashboardOverviewStatsFromLoans_(loansData, includeMembers ? membersData.length : 0),
+    settings: {
+      interestRate: Number(settingsMap.InterestRate) || 12.0,
+      dailyInterestAutomationEnabled: false,
+      dailyInterestAutomationSchedule: 'คำนวณค้างดอกเมื่อกดปิดยอดสิ้นวัน',
+      lastClosedAccountingMonth: String(settingsMap.LastClosedAccountingMonth || '').trim(),
+      lastClosedAccountingAt: String(settingsMap.LastClosedAccountingAt || '').trim(),
+      operatingDayCalendar: normalizeOperatingDayCalendar_(settingsMap[OPERATING_DAY_CALENDAR_SETTING_KEY_]),
+      reportLayoutSettings: normalizeReportLayoutSettings_(settingsMap[REPORT_LAYOUT_SETTINGS_KEY_]),
+      menuSettings: normalizeMenuSettings_(settingsMap[MENU_SETTINGS_KEY_])
+    }
+  };
+
+  if (includeMembers) {
+    appData.members = membersData;
+    appData.currentUser = {
+      userId: String((currentUserSnapshot && currentUserSnapshot.userId) || (sessionData && sessionData.userId) || '').trim(),
+      username: String((currentUserSnapshot && currentUserSnapshot.username) || (sessionData && sessionData.username) || '').trim(),
+      fullName: String((currentUserSnapshot && currentUserSnapshot.fullName) || (sessionData && sessionData.fullName) || '').trim(),
+      email: String((currentUserSnapshot && currentUserSnapshot.email) || '').trim(),
+      role: String((currentUserSnapshot && currentUserSnapshot.role) || (sessionData && sessionData.role) || 'staff').trim(),
+      permissions: (currentUserSnapshot && currentUserSnapshot.permissions) || [],
+      staffPortalUnlocked: !!(currentUserSnapshot && currentUserSnapshot.staffPortalUnlocked),
+      permissionCatalog: getPermissionCatalog_()
+    };
+  }
+
+  return appData;
+}
+
+function syncAllSupabaseSettingsFromSheet_(ss) {
+  if (!canUseSupabaseRuntime_()) return 0;
+  var spreadsheet = ss || getDatabaseSpreadsheet_();
+  var settingsSheet = spreadsheet.getSheetByName('Settings');
+  var rows = readSheetRowsAsObjects_(settingsSheet);
+  var nowIso = new Date().toISOString();
+  var payload = [];
+  for (var i = 0; i < rows.length; i++) {
+    var keys = Object.keys(rows[i] || {});
+    if (!keys.length) continue;
+    var row = buildSupabaseSettingRow_(rows[i][keys[0]], rows[i][keys[1]], nowIso);
+    if (row) payload.push(row);
+  }
+  if (payload.length) {
+    upsertSupabaseRowsInBatches_(null, 'app_settings', payload, ['key'], 250);
+  }
+  invalidateSupabaseRuntimeExecutionCaches_();
+  return payload.length;
+}
+
+function syncAllSupabaseLoansFromSheet_(ss) {
+  if (!canUseSupabaseRuntime_()) return 0;
+  var spreadsheet = ss || getDatabaseSpreadsheet_();
+  var rows = readSheetRowsAsObjects_(spreadsheet.getSheetByName('Loans'));
+  var nowIso = new Date().toISOString();
+  var payload = [];
+  for (var i = 0; i < rows.length; i++) {
+    var row = buildSupabaseLoanRow_(rows[i], nowIso);
+    if (row) payload.push(row);
+  }
+  if (payload.length) {
+    upsertSupabaseRowsInBatches_(null, 'loans', payload, ['contract_no'], 250);
+  }
+  return payload.length;
+}
+
+function syncAllSupabaseMembersFromSheet_(ss) {
+  if (!canUseSupabaseRuntime_()) return 0;
+  var spreadsheet = ss || getDatabaseSpreadsheet_();
+  var rows = readSheetRowsAsObjects_(spreadsheet.getSheetByName('Members'));
+  var nowIso = new Date().toISOString();
+  var payload = [];
+  for (var i = 0; i < rows.length; i++) {
+    var row = buildSupabaseMemberRow_(rows[i], nowIso);
+    if (row) payload.push(row);
+  }
+  if (payload.length) {
+    upsertSupabaseRowsInBatches_(null, 'members', payload, ['member_id'], 250);
+  }
+  return payload.length;
+}
+
+function syncSupabaseLoanByContractFromSheets_(ss, contractNo) {
+  if (!canUseSupabaseRuntime_()) return;
+  var normalizedContract = String(contractNo || '').trim();
+  if (!normalizedContract) return;
+  var spreadsheet = ss || getDatabaseSpreadsheet_();
+  var sheet = spreadsheet.getSheetByName('Loans');
+  var rowIndex = sheet ? findRowByExactValue(sheet, 2, normalizedContract) : 0;
+  if (!rowIndex) {
+    deleteSupabaseRowsByFilters_('loans', { contract_no: normalizedContract });
+    return;
+  }
+  var row = buildSupabaseLoanRow_(readSheetRowAsObject_(sheet, rowIndex), new Date().toISOString());
+  if (row) upsertSupabaseRowsInBatches_(null, 'loans', [row], ['contract_no'], 1);
+}
+
+function syncSupabaseMemberByIdFromSheets_(ss, memberId) {
+  if (!canUseSupabaseRuntime_()) return;
+  var normalizedMemberId = String(memberId || '').trim();
+  if (!normalizedMemberId) return;
+  var spreadsheet = ss || getDatabaseSpreadsheet_();
+  var sheet = spreadsheet.getSheetByName('Members');
+  var rowIndex = sheet ? findRowByExactValue(sheet, 1, normalizedMemberId) : 0;
+  if (!rowIndex) {
+    deleteSupabaseRowsByFilters_('members', { member_id: normalizedMemberId });
+    return;
+  }
+  var row = buildSupabaseMemberRow_(readSheetRowAsObject_(sheet, rowIndex), new Date().toISOString());
+  if (row) upsertSupabaseRowsInBatches_(null, 'members', [row], ['member_id'], 1);
+}
+
+function syncSupabaseTransactionByIdFromSheets_(ss, transactionId) {
+  if (!canUseSupabaseRuntime_()) return;
+  var normalizedTxId = String(transactionId || '').trim();
+  if (!normalizedTxId) return;
+  var spreadsheet = ss || getDatabaseSpreadsheet_();
+  var matched = findExistingTransactionById_(spreadsheet, normalizedTxId);
+  if (!matched || !matched.values) {
+    deleteSupabaseRowsByFilters_('transactions', { reference_id: normalizedTxId });
+    return;
+  }
+  var row = buildSupabaseTransactionRow_(mapTransactionValuesToObject_(matched.values), new Date().toISOString());
+  if (row) upsertSupabaseRowsInBatches_(null, 'transactions', [row], ['reference_id'], 1);
+}
+
+function parseMirrorResultObject_(result) {
+  if (result && typeof result === 'object') return result;
+  var text = String(result || '').trim();
+  if (!text) return null;
+  if ((text.charAt(0) === '{' && text.charAt(text.length - 1) === '}') || (text.charAt(0) === '[' && text.charAt(text.length - 1) === ']')) {
+    try {
+      return JSON.parse(text);
+    } catch (e) {}
+  }
+  return null;
+}
+
+function isSuccessfulLegacyResult_(result) {
+  if (result && typeof result === 'object') {
+    return String(result.status || '').trim() === 'Success';
+  }
+  var text = String(result || '').trim();
+  if (!text) return false;
+  if (text === 'Success' || text.indexOf('Success') === 0) return true;
+  var parsed = parseMirrorResultObject_(text);
+  return !!(parsed && String(parsed.status || '').trim() === 'Success');
+}
+
+var __phase20_orig_getSettingsMapCached_ = getSettingsMapCached_;
+getSettingsMapCached_ = function(settingsSheet) {
+  if (canUseSupabaseRuntime_()) {
+    try {
+      return getSupabaseSettingsMapSnapshot_();
+    } catch (e) {
+      console.error('Supabase settings map fallback to Sheets:', e);
+    }
+  }
+  return __phase20_orig_getSettingsMapCached_(settingsSheet);
+};
+
+var __phase20_orig_getPaymentInterestRateCached_ = getPaymentInterestRateCached_;
+getPaymentInterestRateCached_ = function(ss) {
+  if (canUseSupabaseRuntime_()) {
+    try {
+      if (EXECUTION_PAYMENT_INTEREST_RATE_CACHE_ != null) return EXECUTION_PAYMENT_INTEREST_RATE_CACHE_;
+      var settingsMap = getSupabaseSettingsMapSnapshot_();
+      var interestRate = Number(settingsMap.InterestRate) || 12.0;
+      EXECUTION_PAYMENT_INTEREST_RATE_CACHE_ = interestRate;
+      putJsonCache_(getPaymentInterestRateCacheKey_(), { interestRate: interestRate }, 300);
+      return interestRate;
+    } catch (e) {
+      console.error('Supabase interest rate fallback to Sheets:', e);
+    }
+  }
+  return __phase20_orig_getPaymentInterestRateCached_(ss);
+};
+
+var __phase20_orig_buildAppRuntimeSnapshot_ = buildAppRuntimeSnapshot_;
+buildAppRuntimeSnapshot_ = function(ss, now) {
+  if (canUseSupabaseRuntime_()) {
+    try {
+      return buildSupabaseRuntimePayload_(null, now || new Date(), false);
+    } catch (e) {
+      console.error('Supabase runtime snapshot fallback to Sheets:', e);
+    }
+  }
+  return __phase20_orig_buildAppRuntimeSnapshot_(ss, now);
+};
+
+var __phase20_orig_getAppRuntimeSnapshot = getAppRuntimeSnapshot;
+getAppRuntimeSnapshot = function() {
+  requireAuthenticatedSession_();
+  if (canUseSupabaseRuntime_()) {
+    var cacheKey = 'appRuntimeSnapshot';
+    var cachedData = getJsonCache_(cacheKey);
+    if (cachedData) return cachedData;
+    try {
+      var payload = buildSupabaseRuntimePayload_(null, new Date(), false);
+      putJsonCache_(cacheKey, payload, 120);
+      return payload;
+    } catch (e) {
+      console.error('Supabase getAppRuntimeSnapshot fallback to Sheets:', e);
+    }
+  }
+  return __phase20_orig_getAppRuntimeSnapshot();
+};
+
+var __phase20_orig_getAppData = getAppData;
+getAppData = function() {
+  var sessionData = requireAuthenticatedSession_();
+  if (canUseSupabaseRuntime_()) {
+    var cachedData = getJsonCache_('appDataCache');
+    if (cachedData) {
+      var cachedSnapshot = getUserAuthorizationSnapshot_(sessionData.username);
+      var cachedSettings = cachedData.settings || {};
+      cachedData.currentUser = {
+        userId: String((cachedSnapshot && cachedSnapshot.userId) || sessionData.userId || '').trim(),
+        username: String((cachedSnapshot && cachedSnapshot.username) || sessionData.username || '').trim(),
+        fullName: String((cachedSnapshot && cachedSnapshot.fullName) || sessionData.fullName || '').trim(),
+        role: String((cachedSnapshot && cachedSnapshot.role) || sessionData.role || 'staff').trim(),
+        permissions: (cachedSnapshot && cachedSnapshot.permissions) || [],
+        permissionCatalog: getPermissionCatalog_()
+      };
+      cachedData.settings = {
+        interestRate: Number(cachedSettings.interestRate) || 12.0,
+        dailyInterestAutomationEnabled: false,
+        dailyInterestAutomationSchedule: 'คำนวณค้างดอกเมื่อกดปิดยอดสิ้นวัน',
+        lastClosedAccountingMonth: String(cachedSettings.lastClosedAccountingMonth || '').trim(),
+        lastClosedAccountingAt: String(cachedSettings.lastClosedAccountingAt || '').trim(),
+        operatingDayCalendar: normalizeOperatingDayCalendar_(cachedSettings.operatingDayCalendar),
+        reportLayoutSettings: normalizeReportLayoutSettings_(cachedSettings.reportLayoutSettings),
+        menuSettings: normalizeMenuSettings_(cachedSettings.menuSettings)
+      };
+      return cachedData;
+    }
+    try {
+      var payload = buildSupabaseRuntimePayload_(sessionData, new Date(), true);
+      putJsonCache_('appDataCache', payload, 300);
+      return payload;
+    } catch (e) {
+      console.error('Supabase getAppData fallback to Sheets:', e);
+    }
+  }
+  return __phase20_orig_getAppData();
+};
+
+var __phase20_orig_saveSettings = saveSettings;
+saveSettings = function(settingsStr) {
+  var result = __phase20_orig_saveSettings(settingsStr);
+  if (isSuccessfulLegacyResult_(result) && canUseSupabaseRuntime_()) {
+    try {
+      syncAllSupabaseSettingsFromSheet_(getDatabaseSpreadsheet_());
+    } catch (e) {
+      console.error('Supabase settings mirror failed:', e);
+    }
+  }
+  return result;
+};
+
+var __phase20_orig_addLoan = addLoan;
+addLoan = function(loanDataStr) {
+  var result = __phase20_orig_addLoan(loanDataStr);
+  if (isSuccessfulLegacyResult_(result) && canUseSupabaseRuntime_()) {
+    try {
+      var ss = getDatabaseSpreadsheet_();
+      var loanData = JSON.parse(loanDataStr || '{}');
+      syncSupabaseLoanByContractFromSheets_(ss, loanData.contract);
+      syncAllSupabaseMembersFromSheet_(ss);
+    } catch (e) {
+      console.error('Supabase addLoan mirror failed:', e);
+    }
+  }
+  return result;
+};
+
+var __phase20_orig_editLoan = editLoan;
+editLoan = function(loanDataStr) {
+  var result = __phase20_orig_editLoan(loanDataStr);
+  if (isSuccessfulLegacyResult_(result) && canUseSupabaseRuntime_()) {
+    try {
+      var ss = getDatabaseSpreadsheet_();
+      var loanData = JSON.parse(loanDataStr || '{}');
+      syncSupabaseLoanByContractFromSheets_(ss, loanData.contract);
+      syncAllSupabaseMembersFromSheet_(ss);
+    } catch (e) {
+      console.error('Supabase editLoan mirror failed:', e);
+    }
+  }
+  return result;
+};
+
+var __phase20_orig_updateLoanStatus = updateLoanStatus;
+updateLoanStatus = function(contractNo, status) {
+  var result = __phase20_orig_updateLoanStatus(contractNo, status);
+  if (isSuccessfulLegacyResult_(result) && canUseSupabaseRuntime_()) {
+    try {
+      syncSupabaseLoanByContractFromSheets_(getDatabaseSpreadsheet_(), contractNo);
+    } catch (e) {
+      console.error('Supabase updateLoanStatus mirror failed:', e);
+    }
+  }
+  return result;
+};
+
+var __phase20_orig_deleteLoan = deleteLoan;
+deleteLoan = function(contractNo) {
+  var result = __phase20_orig_deleteLoan(contractNo);
+  if (isSuccessfulLegacyResult_(result) && canUseSupabaseRuntime_()) {
+    try {
+      deleteSupabaseRowsByFilters_('loans', { contract_no: String(contractNo || '').trim() });
+    } catch (e) {
+      console.error('Supabase deleteLoan mirror failed:', e);
+    }
+  }
+  return result;
+};
+
+var __phase20_orig_addMember = addMember;
+addMember = function(memberDataStr) {
+  var result = __phase20_orig_addMember(memberDataStr);
+  if (isSuccessfulLegacyResult_(result) && canUseSupabaseRuntime_()) {
+    try {
+      var memberData = JSON.parse(memberDataStr || '{}');
+      syncSupabaseMemberByIdFromSheets_(getDatabaseSpreadsheet_(), memberData.id);
+    } catch (e) {
+      console.error('Supabase addMember mirror failed:', e);
+    }
+  }
+  return result;
+};
+
+var __phase20_orig_updateMember = updateMember;
+updateMember = function(memberDataStr) {
+  var result = __phase20_orig_updateMember(memberDataStr);
+  if (isSuccessfulLegacyResult_(result) && canUseSupabaseRuntime_()) {
+    try {
+      var ss = getDatabaseSpreadsheet_();
+      var memberData = JSON.parse(memberDataStr || '{}');
+      syncSupabaseMemberByIdFromSheets_(ss, memberData.id);
+      syncAllSupabaseLoansFromSheet_(ss);
+    } catch (e) {
+      console.error('Supabase updateMember mirror failed:', e);
+    }
+  }
+  return result;
+};
+
+var __phase20_orig_deleteMember = deleteMember;
+deleteMember = function(memberId) {
+  var result = __phase20_orig_deleteMember(memberId);
+  if (isSuccessfulLegacyResult_(result) && canUseSupabaseRuntime_()) {
+    try {
+      deleteSupabaseRowsByFilters_('members', { member_id: String(memberId || '').trim() });
+    } catch (e) {
+      console.error('Supabase deleteMember mirror failed:', e);
+    }
+  }
+  return result;
+};
+
+var __phase20_orig_savePayment = savePayment;
+savePayment = function(paymentDataStr) {
+  var result = __phase20_orig_savePayment(paymentDataStr);
+  if (isSuccessfulLegacyResult_(result) && canUseSupabaseRuntime_()) {
+    try {
+      var parsedResult = parseMirrorResultObject_(result) || result || {};
+      var paymentData = JSON.parse(paymentDataStr || '{}');
+      var txId = String((parsedResult && parsedResult.transactionId) || paymentData.id || '').trim();
+      var contractNo = String((parsedResult && parsedResult.transaction && parsedResult.transaction.contract) || paymentData.contract || '').trim();
+      var ss = getDatabaseSpreadsheet_();
+      if (txId) syncSupabaseTransactionByIdFromSheets_(ss, txId);
+      if (contractNo) syncSupabaseLoanByContractFromSheets_(ss, contractNo);
+    } catch (e) {
+      console.error('Supabase savePayment mirror failed:', e);
+    }
+  }
+  return result;
+};
+
+var __phase20_orig_cancelPayment = cancelPayment;
+cancelPayment = function(transactionId, reason) {
+  var result = __phase20_orig_cancelPayment(transactionId, reason);
+  if (isSuccessfulLegacyResult_(result) && canUseSupabaseRuntime_()) {
+    try {
+      var parsedResult = parseMirrorResultObject_(result) || {};
+      var txId = String((parsedResult && parsedResult.transactionId) || transactionId || '').trim();
+      var contractNo = String((parsedResult && parsedResult.contractNo) || '').trim();
+      var ss = getDatabaseSpreadsheet_();
+      if (txId) syncSupabaseTransactionByIdFromSheets_(ss, txId);
+      if (contractNo) syncSupabaseLoanByContractFromSheets_(ss, contractNo);
+    } catch (e) {
+      console.error('Supabase cancelPayment mirror failed:', e);
+    }
+  }
+  return result;
+};
+
+// ==========================================
+// PHASE 21: SUPABASE USERS + PAYMENT LOOKUP
+// ==========================================
+function buildUserRecordFromSupabaseRow_(row) {
+  var source = row || {};
+  return {
+    rowNumber: 0,
+    sourceType: 'supabase',
+    userId: String(source.user_id || '').trim(),
+    username: String(source.username || '').trim().toLowerCase(),
+    fullName: String(source.full_name || '').trim(),
+    email: String(source.email || '').trim().toLowerCase(),
+    passwordHash: String(source.password_hash || '').trim(),
+    role: String(source.role || '').trim().toLowerCase() || 'staff',
+    status: String(source.status || '').trim() || USER_STATUS_ACTIVE,
+    createdAt: String(source.created_at_text || '').trim(),
+    updatedAt: String(source.updated_at_text || '').trim(),
+    lastLoginAt: String(source.last_login_at_text || '').trim(),
+    resetOtpHash: String(source.reset_otp_hash || '').trim(),
+    resetOtpExpireAt: String(source.reset_otp_expire_at_text || '').trim(),
+    resetOtpRequestedAt: String(source.reset_otp_requested_at_text || '').trim(),
+    resetOtpUsedAt: String(source.reset_otp_used_at_text || '').trim(),
+    permissionsJson: String(source.permissions_json || '').trim(),
+    prefix: String(source.prefix || '').trim(),
+    firstName: String(source.first_name || '').trim(),
+    lastName: String(source.last_name || '').trim(),
+    emailVerifiedAt: String(source.email_verified_at_text || '').trim(),
+    pinHash: String(source.pin_hash || '').trim(),
+    pinUniqueKey: String(source.pin_unique_key || '').trim(),
+    pinUpdatedAt: String(source.pin_updated_at_text || '').trim(),
+    emailVerifyOtpHash: String(source.email_verify_otp_hash || '').trim(),
+    emailVerifyOtpExpireAt: String(source.email_verify_otp_expire_at_text || '').trim(),
+    emailVerifyOtpRequestedAt: String(source.email_verify_otp_requested_at_text || '').trim()
+  };
+}
+
+function getSupabaseUserRecords_() {
+  if (
+    EXECUTION_USER_RECORDS_CACHE_
+    && EXECUTION_USER_RECORDS_CACHE_SHEET_ID_ === 'supabase::app_users'
+  ) {
+    return EXECUTION_USER_RECORDS_CACHE_;
+  }
+  var rows = getSupabaseTableRows_('app_users', {
+    select: 'user_id,username,full_name,email,password_hash,role,status,created_at_text,updated_at_text,last_login_at_text,reset_otp_hash,reset_otp_expire_at_text,reset_otp_requested_at_text,reset_otp_used_at_text,permissions_json,prefix,first_name,last_name,email_verified_at_text,pin_hash,pin_unique_key,pin_updated_at_text,email_verify_otp_hash,email_verify_otp_expire_at_text,email_verify_otp_requested_at_text',
+    order: 'username.asc',
+    limit: '5000'
+  });
+  var records = rows.map(buildUserRecordFromSupabaseRow_);
+  EXECUTION_USER_RECORDS_CACHE_ = records;
+  EXECUTION_USER_RECORDS_CACHE_SHEET_ID_ = 'supabase::app_users';
+  EXECUTION_USER_RECORDS_CACHE_LAST_ROW_ = records.length;
+  return records;
+}
+
+function patchSupabaseUserRecord_(userRecord, patch) {
+  if (!userRecord || !patch) return;
+  var fieldMap = {
+    userId: 'user_id',
+    username: 'username',
+    fullName: 'full_name',
+    email: 'email',
+    passwordHash: 'password_hash',
+    role: 'role',
+    status: 'status',
+    createdAt: 'created_at_text',
+    updatedAt: 'updated_at_text',
+    lastLoginAt: 'last_login_at_text',
+    resetOtpHash: 'reset_otp_hash',
+    resetOtpExpireAt: 'reset_otp_expire_at_text',
+    resetOtpRequestedAt: 'reset_otp_requested_at_text',
+    resetOtpUsedAt: 'reset_otp_used_at_text',
+    permissionsJson: 'permissions_json',
+    prefix: 'prefix',
+    firstName: 'first_name',
+    lastName: 'last_name',
+    emailVerifiedAt: 'email_verified_at_text',
+    pinHash: 'pin_hash',
+    pinUniqueKey: 'pin_unique_key',
+    pinUpdatedAt: 'pin_updated_at_text',
+    emailVerifyOtpHash: 'email_verify_otp_hash',
+    emailVerifyOtpExpireAt: 'email_verify_otp_expire_at_text',
+    emailVerifyOtpRequestedAt: 'email_verify_otp_requested_at_text'
+  };
+  var payload = {};
+  var keys = Object.keys(patch);
+  for (var i = 0; i < keys.length; i++) {
+    var dbField = fieldMap[keys[i]];
+    if (!dbField) continue;
+    payload[dbField] = patch[keys[i]];
+    userRecord[keys[i]] = patch[keys[i]];
+  }
+  if (!Object.keys(payload).length) return;
+  var queryParams = userRecord.userId
+    ? { user_id: 'eq.' + encodeURIComponent(String(userRecord.userId).trim()) }
+    : { username: 'eq.' + encodeURIComponent(String(userRecord.username || '').trim()) };
+  callSupabaseRestApi_(null, 'patch', 'app_users', queryParams, payload, {
+    Prefer: 'return=minimal'
+  });
+  invalidateUserRecordsExecutionCache_(null);
+  invalidateUserAuthorizationCache_(userRecord.username || '');
+}
+
+function buildCurrentMonthInterestPaidMapFromSupabaseRows_(rows, currentMonthContext) {
+  var map = {};
+  var yearBe = Number(currentMonthContext && currentMonthContext.yearBe) || 0;
+  var month = Number(currentMonthContext && currentMonthContext.month) || 0;
+  var data = Array.isArray(rows) ? rows : [];
+  for (var i = 0; i < data.length; i++) {
+    var row = data[i] || {};
+    if (isInactiveTransactionStatus_(String(row.tx_status || '').trim())) continue;
+    var timestamp = String(row.occurred_on_text || '').trim();
+    var parts = parseThaiDateParts_(timestamp);
+    if (!parts) continue;
+    if (Number(parts.yearBe) !== yearBe || Number(parts.month) !== month) continue;
+    var contractNo = String(row.contract_no || '').trim();
+    if (!contractNo) continue;
+    map[contractNo] = true;
+  }
+  return map;
+}
+
+function buildPaymentLoanFromSupabaseLoanRow_(row, currentMonthContext, currentMonthInterestPaidMap, lastClosedAccountingMonth) {
+  var source = row || {};
+  var balance = Number(source.outstanding_balance) || 0;
+  var interestRate = Number(source.interest_rate);
+  if (!isFinite(interestRate) || interestRate < 0) interestRate = 12.0;
+  var contractNo = String(source.contract_no || '').trim();
+  var missedInterestMonths = Math.max(0, Number(source.overdue_months) || 0);
+  var currentMonthInterestPaid = !!(currentMonthInterestPaidMap && currentMonthInterestPaidMap[contractNo]);
+  var includeCurrentMonthInstallment = shouldCountSelectedMonthAsDueForOverdueReport_(currentMonthContext.yearBe, currentMonthContext.month, lastClosedAccountingMonth);
+  var currentMonthRequiredInstallment = includeCurrentMonthInstallment && !currentMonthInterestPaid ? 1 : 0;
+  var reportMissedInterestMonths = missedInterestMonths + currentMonthRequiredInstallment;
+  return {
+    memberId: String(source.member_id || '').trim(),
+    contract: contractNo,
+    member: String(source.borrower_name || '').trim(),
+    amount: Number(source.principal_amount) || 0,
+    interest: interestRate,
+    balance: balance,
+    status: deriveLoanStatusFromState_(balance, missedInterestMonths, String(source.status || '').trim()),
+    nextPayment: String(source.due_date_text || '').trim(),
+    missedInterestMonths: missedInterestMonths,
+    currentMonthInterestPaid: currentMonthInterestPaid,
+    reportMissedInterestMonths: reportMissedInterestMonths,
+    currentMonthRequiredInstallment: currentMonthRequiredInstallment,
+    maxInterestInstallments: Math.max(1, reportMissedInterestMonths),
+    monthlyInterestDue: Math.max(0, Math.floor(Math.max(0, balance) * (interestRate / 100) / 12)),
+    createdAt: normalizeLoanCreatedAt_(source.created_date_text),
+    guarantor1: String(source.guarantor_1 || '').trim(),
+    guarantor2: String(source.guarantor_2 || '').trim()
+  };
+}
+
+function getSupabasePaymentLoansByMemberId_(memberId) {
+  var normalizedMemberId = String(memberId || '').trim();
+  if (!normalizedMemberId) return [];
+  var now = new Date();
+  var currentMonthContext = (function() {
+    var parts = parseThaiDateParts_(now) || { month: now.getMonth() + 1, yearBe: now.getFullYear() + 543 };
+    return {
+      month: parts.month,
+      yearBe: parts.yearBe,
+      monthKey: parts.yearBe + '-' + padNumber_(parts.month, 2)
+    };
+  })();
+  var settingsMap = getSupabaseSettingsMapSnapshot_();
+  var loanRows = getSupabaseTableRows_('loans', {
+    select: 'contract_no,member_id,borrower_name,principal_amount,interest_rate,outstanding_balance,status,due_date_text,overdue_months,created_date_text,guarantor_1,guarantor_2',
+    member_id: 'eq.' + normalizedMemberId,
+    order: 'outstanding_balance.desc,contract_no.asc',
+    limit: '500'
+  });
+  var txRows = getSupabaseTableRows_('transactions', {
+    select: 'contract_no,occurred_on_text,tx_status',
+    member_id: 'eq.' + normalizedMemberId,
+    order: 'updated_at.desc',
+    limit: '1000'
+  });
+  var currentMonthInterestPaidMap = buildCurrentMonthInterestPaidMapFromSupabaseRows_(txRows, currentMonthContext);
+  return loanRows.map(function(row) {
+    return buildPaymentLoanFromSupabaseLoanRow_(row, currentMonthContext, currentMonthInterestPaidMap, String(settingsMap.LastClosedAccountingMonth || '').trim());
+  }).sort(function(a, b) {
+    var balanceDiff = (Number(b.balance) || 0) - (Number(a.balance) || 0);
+    if (balanceDiff !== 0) return balanceDiff;
+    return String(a.contract || '').localeCompare(String(b.contract || ''), 'th', { numeric: true, sensitivity: 'base' });
+  });
+}
+
+function getSupabasePaymentReadyLoans_() {
+  var now = new Date();
+  var currentMonthContext = (function() {
+    var parts = parseThaiDateParts_(now) || { month: now.getMonth() + 1, yearBe: now.getFullYear() + 543 };
+    return {
+      month: parts.month,
+      yearBe: parts.yearBe,
+      monthKey: parts.yearBe + '-' + padNumber_(parts.month, 2)
+    };
+  })();
+  var settingsMap = getSupabaseSettingsMapSnapshot_();
+  var loanRows = getSupabaseTableRows_('loans', {
+    select: 'contract_no,member_id,borrower_name,principal_amount,interest_rate,outstanding_balance,status,due_date_text,overdue_months,created_date_text,guarantor_1,guarantor_2',
+    order: 'member_id.asc,contract_no.asc',
+    limit: '5000'
+  });
+  var txRows = getSupabaseTableRows_('transactions', {
+    select: 'contract_no,occurred_on_text,tx_status',
+    order: 'updated_at.desc',
+    limit: '5000'
+  });
+  var currentMonthInterestPaidMap = buildCurrentMonthInterestPaidMapFromSupabaseRows_(txRows, currentMonthContext);
+  return loanRows.map(function(row) {
+    return buildPaymentLoanFromSupabaseLoanRow_(row, currentMonthContext, currentMonthInterestPaidMap, String(settingsMap.LastClosedAccountingMonth || '').trim());
+  });
+}
+
+function getSupabaseTodayTransactionsByMemberId_(memberId) {
+  var normalizedMemberId = String(memberId || '').trim();
+  if (!normalizedMemberId) return [];
+  var todayThaiDate = getThaiDate(new Date()).dateOnly;
+  var rows = getSupabaseTableRows_('transactions', {
+    select: 'reference_id,occurred_on_text,contract_no,member_id,principal_paid,interest_paid,outstanding_balance,note,full_name,tx_status,interest_months_paid,overdue_interest_before,overdue_interest_after',
+    member_id: 'eq.' + normalizedMemberId,
+    order: 'updated_at.desc',
+    limit: '500'
+  });
+  return rows.map(function(row) {
+    return buildPaymentTodayTransactionFromIndexValues_([
+      '',
+      String(row.member_id || '').trim(),
+      String(row.reference_id || '').trim(),
+      String(row.occurred_on_text || '').trim(),
+      String(row.contract_no || '').trim(),
+      Number(row.principal_paid) || 0,
+      Number(row.interest_paid) || 0,
+      Number(row.outstanding_balance) || 0,
+      String(row.note || '').trim(),
+      String(row.full_name || '').trim(),
+      String(row.tx_status || '').trim() || 'ปกติ',
+      Math.max(0, Number(row.interest_months_paid) || 0),
+      ''
+    ]);
+  }).filter(function(tx) {
+    if (isInactiveTransactionStatus_(String(tx.txStatus || '').trim())) return false;
+    var dateOnly = String(tx.timestamp || '').split(' ')[0] || '';
+    return dateOnly === todayThaiDate;
+  }).sort(function(a, b) {
+    return String((b && b.timestamp) || '').localeCompare(String((a && a.timestamp) || ''));
+  });
+}
+
+var __phase21_orig_getAllUserRecords_ = getAllUserRecords_;
+getAllUserRecords_ = function(usersSheet) {
+  if (canUseSupabaseRuntime_()) {
+    try {
+      return getSupabaseUserRecords_();
+    } catch (e) {
+      console.error('Supabase getAllUserRecords_ fallback to Sheets:', e);
+    }
+  }
+  return __phase21_orig_getAllUserRecords_(usersSheet);
+};
+
+var __phase21_orig_findUserByUsernameInternal_ = findUserByUsernameInternal_;
+findUserByUsernameInternal_ = function(usersSheet, username) {
+  if (canUseSupabaseRuntime_()) {
+    var normalized = normalizeUsername_(username);
+    if (!normalized) return null;
+    try {
+      var users = getSupabaseUserRecords_();
+      for (var i = 0; i < users.length; i++) {
+        if (users[i].username === normalized) return users[i];
+      }
+      return null;
+    } catch (e) {
+      console.error('Supabase findUserByUsernameInternal_ fallback to Sheets:', e);
+    }
+  }
+  return __phase21_orig_findUserByUsernameInternal_(usersSheet, username);
+};
+
+var __phase21_orig_findUserByIdentifierInternal_ = findUserByIdentifierInternal_;
+findUserByIdentifierInternal_ = function(usersSheet, identifier) {
+  if (canUseSupabaseRuntime_()) {
+    var normalized = String(identifier || '').trim();
+    var normalizedUsername = normalizeUsername_(normalized);
+    var normalizedEmail = normalizeEmail_(normalized);
+    if (!normalizedUsername && !normalizedEmail) return null;
+    try {
+      var users = getSupabaseUserRecords_();
+      for (var i = 0; i < users.length; i++) {
+        if (users[i].username === normalizedUsername || (users[i].email && users[i].email === normalizedEmail)) {
+          return users[i];
+        }
+      }
+      return null;
+    } catch (e) {
+      console.error('Supabase findUserByIdentifierInternal_ fallback to Sheets:', e);
+    }
+  }
+  return __phase21_orig_findUserByIdentifierInternal_(usersSheet, identifier);
+};
+
+var __phase21_orig_updateUserCellsByRecord_ = updateUserCellsByRecord_;
+updateUserCellsByRecord_ = function(usersSheet, userRecord, patch) {
+  if (canUseSupabaseRuntime_()) {
+    try {
+      return patchSupabaseUserRecord_(userRecord, patch);
+    } catch (e) {
+      console.error('Supabase updateUserCellsByRecord_ fallback to Sheets:', e);
+    }
+  }
+  return __phase21_orig_updateUserCellsByRecord_(usersSheet, userRecord, patch);
+};
+
+var __phase21_orig_getIndexedPaymentLoansByMemberIdFast_ = getIndexedPaymentLoansByMemberIdFast_;
+getIndexedPaymentLoansByMemberIdFast_ = function(ss, memberId) {
+  if (canUseSupabaseRuntime_()) {
+    var normalizedMemberId = String(memberId || '').trim();
+    if (!normalizedMemberId) return [];
+    if (EXECUTION_PAYMENT_MEMBER_LOOKUP_CACHE_[normalizedMemberId]) {
+      return EXECUTION_PAYMENT_MEMBER_LOOKUP_CACHE_[normalizedMemberId].slice();
+    }
+    try {
+      var loans = getSupabasePaymentLoansByMemberId_(normalizedMemberId);
+      EXECUTION_PAYMENT_MEMBER_LOOKUP_CACHE_[normalizedMemberId] = loans.slice();
+      return loans;
+    } catch (e) {
+      console.error('Supabase getIndexedPaymentLoansByMemberIdFast_ fallback to Sheets:', e);
+    }
+  }
+  return __phase21_orig_getIndexedPaymentLoansByMemberIdFast_(ss, memberId);
+};
+
+var __phase21_orig_getIndexedTodayTransactionsByMemberIdFast_ = getIndexedTodayTransactionsByMemberIdFast_;
+getIndexedTodayTransactionsByMemberIdFast_ = function(ss, memberId) {
+  if (canUseSupabaseRuntime_()) {
+    var normalizedMemberId = String(memberId || '').trim();
+    if (!normalizedMemberId) return [];
+    if (EXECUTION_PAYMENT_MEMBER_TODAY_CACHE_[normalizedMemberId]) {
+      return EXECUTION_PAYMENT_MEMBER_TODAY_CACHE_[normalizedMemberId].slice();
+    }
+    try {
+      var rows = getSupabaseTodayTransactionsByMemberId_(normalizedMemberId);
+      EXECUTION_PAYMENT_MEMBER_TODAY_CACHE_[normalizedMemberId] = rows.slice();
+      return rows;
+    } catch (e) {
+      console.error('Supabase getIndexedTodayTransactionsByMemberIdFast_ fallback to Sheets:', e);
+    }
+  }
+  return __phase21_orig_getIndexedTodayTransactionsByMemberIdFast_(ss, memberId);
+};
+
+var __phase21_orig_getPaymentReadyData = getPaymentReadyData;
+getPaymentReadyData = function() {
+  requireAuthenticatedSession_();
+  if (canUseSupabaseRuntime_()) {
+    var cacheKey = 'paymentReadyDataCache';
+    var cachedData = getJsonCache_(cacheKey);
+    if (cachedData) return cachedData;
+    try {
+      var payload = {
+        status: 'Success',
+        loans: getSupabasePaymentReadyLoans_(),
+        settings: {
+          interestRate: getPaymentInterestRateCached_(null)
+        }
+      };
+      putJsonCache_(cacheKey, payload, 120);
+      return payload;
+    } catch (e) {
+      console.error('Supabase getPaymentReadyData fallback to Sheets:', e);
+    }
+  }
+  return __phase21_orig_getPaymentReadyData();
 };
