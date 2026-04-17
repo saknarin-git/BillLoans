@@ -72,7 +72,13 @@ supabase functions deploy app-api --project-ref fdtjomvkmpohdgdfbzst --no-verify
 
 ## 4.1 ตั้งค่า auto deploy ผ่าน GitHub Actions
 
-repo นี้มี workflow ที่ [../.github/workflows/supabase-functions.yml](../.github/workflows/supabase-functions.yml) สำหรับ deploy function อัตโนมัติเมื่อ push เข้า branch `main` และมีการเปลี่ยนแปลงในโฟลเดอร์ `supabase/` โดยจะ deploy เฉพาะ function ที่มีไฟล์เปลี่ยนจริง
+repo นี้มี workflow ที่ [../.github/workflows/supabase-functions.yml](../.github/workflows/supabase-functions.yml) สำหรับ validate และ deploy function อัตโนมัติ
+
+พฤติกรรมของ workflow:
+
+- เมื่อเปิด `pull_request` ที่แตะไฟล์ใน `supabase/` จะรัน `deno fmt --check` และ `deno check` ให้ก่อน
+- เมื่อ `push` เข้า `main` และมีการเปลี่ยนแปลงที่เกี่ยวข้องกับ `app-api` จะ deploy `app-api` อัตโนมัติ
+- สามารถกด `workflow_dispatch` เพื่อบังคับ deploy `app-api` ได้แม้ GitHub จะไม่ detect file change ในรอบนั้น
 
 ให้เพิ่ม GitHub repository secrets ดังนี้:
 
@@ -83,10 +89,11 @@ repo นี้มี workflow ที่ [../.github/workflows/supabase-functions
 - `PIN_UNIQUE_PEPPER`
 - `APP_LOGIN_REQUIRED`
 
-พอ secrets ครบแล้ว workflow จะทำ 2 อย่างอัตโนมัติ:
+พอ secrets ครบแล้ว workflow จะทำ 3 อย่างตาม event ที่เรียก:
 
-- sync ค่า secrets ขึ้น Supabase
-- deploy เฉพาะ function ที่เปลี่ยนในรอบนั้น
+- validate syntax/format ของ Edge Function ก่อน
+- sync ค่า secrets ขึ้น Supabase ตอนรัน deploy
+- deploy `app-api` เมื่อเข้าเงื่อนไขของ `push main` หรือ manual run
 
 ## 5. ทดสอบ endpoint หลัง deploy
 

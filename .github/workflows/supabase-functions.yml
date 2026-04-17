@@ -1,0 +1,132 @@
+name: Validate And Deploy Supabase Functions
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - supabase/**
+      - .github/workflows/supabase-functions.yml
+  pull_request:
+    paths:
+      - supabase/**
+      - .github/workflows/supabase-functions.yml
+  workflow_dispatch:
+    inputs:
+      deploy_app_api:
+        description: Deploy app-api even if GitHub cannot detect a file change
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-functions
+  cancel-in-progress: true
+
+env:
+  SUPABASE_PROJECT_REF: fdtjomvkmpohdgdfbzst
+
+jobs:
+  detect_changes:
+    runs-on: ubuntu-latest
+    outputs:
+      app_api: ${{ steps.changes.outputs.app_api }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Detect changed functions
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            app_api:
+              - 'supabase/functions/app-api/**'
+              - 'supabase/config.toml'
+              - '.github/workflows/supabase-functions.yml'
+
+      - name: Summarize change plan
+        run: |
+          echo "## Supabase workflow plan" >> "$GITHUB_STEP_SUMMARY"
+          echo "- app-api changed: ${{ steps.changes.outputs.app_api }}" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "- mode: manual run" >> "$GITHUB_STEP_SUMMARY"
+            echo "- deploy app-api input: ${{ inputs.deploy_app_api }}" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "- mode: validate only" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- mode: push run" >> "$GITHUB_STEP_SUMMARY"
+            echo "- will deploy app-api: ${{ steps.changes.outputs.app_api }}" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  validate_app_api:
+    runs-on: ubuntu-latest
+    needs: detect_changes
+    if: needs.detect_changes.outputs.app_api == 'true' || github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Check formatting
+        run: deno fmt --check supabase/functions/app-api/index.ts supabase/functions/app-api/contracts.ts
+
+      - name: Type check Edge Function
+        run: deno check supabase/functions/app-api/index.ts
+
+      - name: Summarize validation
+        run: |
+          echo "## Validation result" >> "$GITHUB_STEP_SUMMARY"
+          echo "- deno fmt --check: passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- deno check: passed" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs:
+      - detect_changes
+      - validate_app_api
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Push function secrets
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          APP_SESSION_SIGNING_SECRET: ${{ secrets.APP_SESSION_SIGNING_SECRET }}
+          PIN_UNIQUE_PEPPER: ${{ secrets.PIN_UNIQUE_PEPPER }}
+          APP_LOGIN_REQUIRED: ${{ secrets.APP_LOGIN_REQUIRED }}
+        run: |
+          supabase secrets set \
+            SUPABASE_URL="$SUPABASE_URL" \
+            SUPABASE_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY" \
+            APP_SESSION_SIGNING_SECRET="$APP_SESSION_SIGNING_SECRET" \
+            PIN_UNIQUE_PEPPER="$PIN_UNIQUE_PEPPER" \
+            APP_LOGIN_REQUIRED="$APP_LOGIN_REQUIRED" \
+            --project-ref "$SUPABASE_PROJECT_REF"
+
+      - name: Deploy app-api
+        if: github.event_name == 'push' && needs.detect_changes.outputs.app_api == 'true' || github.event_name == 'workflow_dispatch' && inputs.deploy_app_api
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase functions deploy app-api --project-ref "$SUPABASE_PROJECT_REF" --no-verify-jwt
+
+      - name: Summarize deploy result
+        if: github.event_name == 'push' && needs.detect_changes.outputs.app_api == 'true' || github.event_name == 'workflow_dispatch' && inputs.deploy_app_api
+        run: |
+          echo "## Deploy result" >> "$GITHUB_STEP_SUMMARY"
+          echo "- app-api deployed to project $SUPABASE_PROJECT_REF" >> "$GITHUB_STEP_SUMMARY"
