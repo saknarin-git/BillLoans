@@ -36,7 +36,13 @@ const DEFAULT_INTEREST_RATE = 12;
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOGIN_LOCKOUT_SECONDS = 15 * 60;
-const APPROVED_NAME_PREFIXES = ["นาย", "นาง", "นางสาว", "เด็กหญิง", "เด็กชาย"] as const;
+const APPROVED_NAME_PREFIXES = [
+  "นาย",
+  "นาง",
+  "นางสาว",
+  "เด็กหญิง",
+  "เด็กชาย",
+] as const;
 
 const loginAttemptState = new Map<
   string,
@@ -134,8 +140,8 @@ const normalizeUserStatus = (value: unknown) => {
 const normalizeApprovedPrefix = (value: unknown) => {
   const normalized = normalizeText(value);
   return APPROVED_NAME_PREFIXES.includes(
-    normalized as (typeof APPROVED_NAME_PREFIXES)[number],
-  )
+      normalized as (typeof APPROVED_NAME_PREFIXES)[number],
+    )
     ? normalized
     : "";
 };
@@ -2209,10 +2215,16 @@ const registerUser = async (payload: RpcPayload) => {
     return { status: "Error", message: "กรุณากรอกสกุล" } as JsonObject;
   }
   if (!fullName) {
-    return { status: "Error", message: "กรุณากรอกชื่อและสกุลให้ครบถ้วน" } as JsonObject;
+    return {
+      status: "Error",
+      message: "กรุณากรอกชื่อและสกุลให้ครบถ้วน",
+    } as JsonObject;
   }
   if (!username || username.length < 4) {
-    return { status: "Error", message: "ชื่อผู้ใช้ต้องยาวอย่างน้อย 4 ตัวอักษร" } as JsonObject;
+    return {
+      status: "Error",
+      message: "ชื่อผู้ใช้ต้องยาวอย่างน้อย 4 ตัวอักษร",
+    } as JsonObject;
   }
   if (!/^[a-zA-Z0-9._-]+$/.test(username)) {
     return {
