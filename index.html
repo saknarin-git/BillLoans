@@ -2976,7 +2976,7 @@
     const [loginUsername, setLoginUsername] = useState("");
     const [loginPin, setLoginPin] = useState("");
     const loginPinInputRefs = useRef([]);
-    const [registerForm, setRegisterForm] = useState({ memberId: "", prefix: "", firstName: "", lastName: "", username: "", email: "", pin: "", confirmPin: "" });
+    const [registerForm, setRegisterForm] = useState({ prefix: "", firstName: "", lastName: "", username: "", pin: "", confirmPin: "" });
     const [forgotForm, setForgotForm] = useState({ identifier: "", otp: "", newPin: "", confirmPin: "" });
     const [emailVerifyForm, setEmailVerifyForm] = useState({ identifier: "", otp: "" });
     const [adminRecoveryForm, setAdminRecoveryForm] = useState({ recoveryKey: "", newPin: "", confirmPin: "" });
@@ -3219,16 +3219,33 @@
       });
     }, []);
     const callBackend = useCallback((methodName, ...args) => new Promise((resolve, reject) => {
-      if (!(typeof google !== "undefined" && google.script && google.script.run)) {
-        reject(new Error("ไม่สามารถเชื่อมต่อ backend ได้"));
-        return;
-      }
+      const tryGasFallback = (originalError) => {
+        if (!(typeof google !== "undefined" && google.script && google.script.run)) {
+          reject(originalError || new Error("ไม่สามารถเชื่อมต่อ backend ได้"));
+          return;
+        }
+        try {
+          let runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
+          runner[methodName](...args);
+        } catch (error) {
+          reject(error || originalError);
+        }
+      };
+
       try {
-        let runner = google.script.run.withSuccessHandler(resolve).withFailureHandler(reject);
-        runner[methodName](...args);
+        const configuredUrl = typeof window.getBackendApiUrl === "function" ? String(window.getBackendApiUrl() || "").trim() : "";
+        if (configuredUrl) {
+          invokeRemoteBackendMethod(methodName, args).then(resolve).catch((error) => {
+            console.warn("Remote backend call failed, falling back to GAS", { methodName, error });
+            tryGasFallback(error);
+          });
+          return;
+        }
       } catch (error) {
-        reject(error);
+        console.warn("Backend URL detection failed, falling back to GAS", error);
       }
+
+      tryGasFallback(new Error("ไม่สามารถเชื่อมต่อ backend ได้"));
     }), []);
     const callBackendCached = useCallback(({ cacheKey, methodName, args = [], ttlMs = 15000, forceReload = false }) => {
       const normalizedKey = String(cacheKey || methodName || "backend");
@@ -6667,26 +6684,21 @@ const getQuickOverviewToneClass = (tone) => {
       }
       setIsSavingProfile(true);
       setProfileSaveMessage({ type: "loading", text: "กำลังบันทึกอีเมล..." });
-      if (typeof google !== "undefined" && google.script && google.script.run) {
-        google.script.run.withSuccessHandler((response) => {
-          const result = typeof response === "string" ? { status: response } : response || {};
-          if (result.status === "Success") {
-            const savedEmail = String((result == null ? void 0 : result.email) || normalizedEmail || "").trim().toLowerCase();
-            setCurrentUserEmail(savedEmail);
-            setProfileEmailDraft(savedEmail);
-            setProfileSaveMessage({ type: "success", text: (result == null ? void 0 : result.message) || "บันทึกอีเมลเรียบร้อยแล้ว" });
-          } else {
-            setProfileSaveMessage({ type: "error", text: (result == null ? void 0 : result.message) || "บันทึกอีเมลไม่สำเร็จ" });
-          }
-          setIsSavingProfile(false);
-        }).withFailureHandler((error) => {
-          setProfileSaveMessage({ type: "error", text: "บันทึกอีเมลไม่สำเร็จ: " + (((error == null ? void 0 : error.message) || error || "ไม่ทราบสาเหตุ")) });
-          setIsSavingProfile(false);
-        }).updateCurrentUserProfile(JSON.stringify({ email: normalizedEmail }));
-      } else {
-        setProfileSaveMessage({ type: "error", text: "ไม่สามารถเชื่อมต่อระบบเพื่อบันทึกอีเมลได้" });
+      callBackend("updateCurrentUserProfile", JSON.stringify({ email: normalizedEmail })).then((response) => {
+        const result = typeof response === "string" ? { status: response } : response || {};
+        if (result.status === "Success") {
+          const savedEmail = String((result == null ? void 0 : result.email) || normalizedEmail || "").trim().toLowerCase();
+          setCurrentUserEmail(savedEmail);
+          setProfileEmailDraft(savedEmail);
+          setProfileSaveMessage({ type: "success", text: (result == null ? void 0 : result.message) || "บันทึกอีเมลเรียบร้อยแล้ว" });
+        } else {
+          setProfileSaveMessage({ type: "error", text: (result == null ? void 0 : result.message) || "บันทึกอีเมลไม่สำเร็จ" });
+        }
         setIsSavingProfile(false);
-      }
+      }).catch((error) => {
+        setProfileSaveMessage({ type: "error", text: "บันทึกอีเมลไม่สำเร็จ: " + (((error == null ? void 0 : error.message) || error || "ไม่ทราบสาเหตุ")) });
+        setIsSavingProfile(false);
+      });
     };
     const handleLogin = (e) => {
       e.preventDefault();
@@ -6704,64 +6716,59 @@ const getQuickOverviewToneClass = (tone) => {
       }
       setIsLoading(true);
       setAuthNotice({ type: "loading", message: "กำลังตรวจสอบข้อมูลเข้าสู่ระบบ..." });
-      if (typeof google !== "undefined" && google.script && google.script.run) {
-        google.script.run.withSuccessHandler((response) => {
-          const result = typeof response === "string" ? { status: response } : response || {};
-          if (result.status === "Success") {
-            const normalizedUsername = String((result == null ? void 0 : result.username) || username || "admin").trim() || "admin";
-            const normalizedFullName = String((result == null ? void 0 : result.fullName) || normalizedUsername || "").trim();
-            const normalizedEmail = String((result == null ? void 0 : result.email) || "").trim().toLowerCase();
-            const normalizedRole = String((result == null ? void 0 : result.role) || "staff").trim().toLowerCase();
-            const normalizedPermissions = Array.isArray(result == null ? void 0 : result.permissions) ? result.permissions : [];
-            const normalizedStaffPortalUnlocked = !!(result == null ? void 0 : result.staffPortalUnlocked);
-            const normalizedStaffPortalUnlockedAt = String((result == null ? void 0 : result.staffPortalUnlockedAt) || "").trim();
-            if (typeof (result == null ? void 0 : result.sessionToken) === "string" && result.sessionToken.trim()) {
-              setStoredBackendSessionToken(result.sessionToken.trim());
-            }
-            sessionStorage.setItem("activeTab", "profile");
-            sessionStorage.setItem("currentUsername", normalizedUsername);
-            sessionStorage.setItem("currentUserFullName", normalizedFullName);
-            sessionStorage.setItem("currentUserEmail", normalizedEmail);
-            sessionStorage.setItem("currentUserRole", normalizedRole);
-            try {
-              sessionStorage.setItem("currentUserPermissions", JSON.stringify(normalizedPermissions));
-            } catch (e) {}
-            sessionStorage.setItem("staffPortalUnlocked", normalizedStaffPortalUnlocked ? "true" : "false");
-            sessionStorage.setItem("staffPortalUnlockedAt", normalizedStaffPortalUnlockedAt || "");
-            setCurrentUsername(normalizedUsername);
-            setCurrentUserFullName(normalizedFullName);
-            setCurrentUserEmail(normalizedEmail);
-            setProfileEmailDraft(normalizedEmail);
-            setCurrentUserRole(normalizedRole);
-            setCurrentUserPermissions(normalizedPermissions);
-            setStaffPortalUnlocked(normalizedStaffPortalUnlocked);
-            setStaffPortalUnlockedAt(normalizedStaffPortalUnlockedAt);
-            setPermissionCatalog(Array.isArray(result == null ? void 0 : result.permissionCatalog) ? result.permissionCatalog : []);
-            setLoginUsername("");
-            setLoginPin("");
-            setActiveTab("payments");
-            setAuthNotice({ type: "idle", message: "" });
-            setIsAuthenticated(true);
-          } else {
-            const loginMessage = (result == null ? void 0 : result.message) || "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง";
-            setAuthNotice({ type: "error", message: loginMessage });
-            setLoginPin("");
-            if (form && typeof form.reset === "function") form.reset();
-            resetClientSession(loginMessage);
+      callBackend("verifyLogin", loginUsername, loginPin).then((response) => {
+        const result = typeof response === "string" ? { status: response } : response || {};
+        if (result.status === "Success") {
+          const normalizedUsername = String((result == null ? void 0 : result.username) || username || "admin").trim() || "admin";
+          const normalizedFullName = String((result == null ? void 0 : result.fullName) || normalizedUsername || "").trim();
+          const normalizedEmail = String((result == null ? void 0 : result.email) || "").trim().toLowerCase();
+          const normalizedRole = String((result == null ? void 0 : result.role) || "staff").trim().toLowerCase();
+          const normalizedPermissions = Array.isArray(result == null ? void 0 : result.permissions) ? result.permissions : [];
+          const normalizedStaffPortalUnlocked = !!(result == null ? void 0 : result.staffPortalUnlocked);
+          const normalizedStaffPortalUnlockedAt = String((result == null ? void 0 : result.staffPortalUnlockedAt) || "").trim();
+          if (typeof (result == null ? void 0 : result.sessionToken) === "string" && result.sessionToken.trim()) {
+            setStoredBackendSessionToken(result.sessionToken.trim());
           }
-          setIsLoading(false);
-        }).withFailureHandler((error) => {
-          const loginErrorMessage = "เข้าสู่ระบบไม่สำเร็จ: " + (((error == null ? void 0 : error.message) || error || "ไม่ทราบสาเหตุ"));
-          setAuthNotice({ type: "error", message: loginErrorMessage });
+          sessionStorage.setItem("activeTab", "profile");
+          sessionStorage.setItem("currentUsername", normalizedUsername);
+          sessionStorage.setItem("currentUserFullName", normalizedFullName);
+          sessionStorage.setItem("currentUserEmail", normalizedEmail);
+          sessionStorage.setItem("currentUserRole", normalizedRole);
+          try {
+            sessionStorage.setItem("currentUserPermissions", JSON.stringify(normalizedPermissions));
+          } catch (e) {}
+          sessionStorage.setItem("staffPortalUnlocked", normalizedStaffPortalUnlocked ? "true" : "false");
+          sessionStorage.setItem("staffPortalUnlockedAt", normalizedStaffPortalUnlockedAt || "");
+          setCurrentUsername(normalizedUsername);
+          setCurrentUserFullName(normalizedFullName);
+          setCurrentUserEmail(normalizedEmail);
+          setProfileEmailDraft(normalizedEmail);
+          setCurrentUserRole(normalizedRole);
+          setCurrentUserPermissions(normalizedPermissions);
+          setStaffPortalUnlocked(normalizedStaffPortalUnlocked);
+          setStaffPortalUnlockedAt(normalizedStaffPortalUnlockedAt);
+          setPermissionCatalog(Array.isArray(result == null ? void 0 : result.permissionCatalog) ? result.permissionCatalog : []);
+          setLoginUsername("");
+          setLoginPin("");
+          setActiveTab("payments");
+          setAuthNotice({ type: "idle", message: "" });
+          setIsAuthenticated(true);
+        } else {
+          const loginMessage = (result == null ? void 0 : result.message) || "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง";
+          setAuthNotice({ type: "error", message: loginMessage });
           setLoginPin("");
           if (form && typeof form.reset === "function") form.reset();
-          resetClientSession(loginErrorMessage);
-          setIsLoading(false);
-        }).verifyLogin(loginUsername, loginPin);
-      } else {
-        setAuthNotice({ type: "error", message: "ไม่สามารถเชื่อมต่อระบบเพื่อเข้าสู่ระบบได้" });
+          resetClientSession(loginMessage);
+        }
         setIsLoading(false);
-      }
+      }).catch((error) => {
+        const loginErrorMessage = "เข้าสู่ระบบไม่สำเร็จ: " + (((error == null ? void 0 : error.message) || error || "ไม่ทราบสาเหตุ"));
+        setAuthNotice({ type: "error", message: loginErrorMessage });
+        setLoginPin("");
+        if (form && typeof form.reset === "function") form.reset();
+        resetClientSession(loginErrorMessage);
+        setIsLoading(false);
+      });
     };
     const handleLogout = () => {
       if (isLoading) return;
@@ -6770,19 +6777,15 @@ const getQuickOverviewToneClass = (tone) => {
         setInitialLoadError(null);
         setAuthNotice({ type: "success", message: message || "ออกจากระบบเรียบร้อยแล้ว" });
       };
-      if (typeof google !== "undefined" && google.script && google.script.run) {
-        setIsLoading(true);
-        google.script.run.withSuccessHandler((response) => {
-          const result = typeof response === "string" ? { status: response } : response || {};
-          finishLogout((result == null ? void 0 : result.message) || "ออกจากระบบเรียบร้อยแล้ว");
-          setIsLoading(false);
-        }).withFailureHandler(() => {
-          finishLogout("ออกจากระบบบนอุปกรณ์นี้เรียบร้อยแล้ว");
-          setIsLoading(false);
-        }).logoutCurrentSession();
-      } else {
-        finishLogout("ออกจากระบบเรียบร้อยแล้ว");
-      }
+      setIsLoading(true);
+      callBackend("logoutCurrentSession").then((response) => {
+        const result = typeof response === "string" ? { status: response } : response || {};
+        finishLogout((result == null ? void 0 : result.message) || "ออกจากระบบเรียบร้อยแล้ว");
+        setIsLoading(false);
+      }).catch(() => {
+        finishLogout("ออกจากระบบบนอุปกรณ์นี้เรียบร้อยแล้ว");
+        setIsLoading(false);
+      });
     };
     const handleRegisterSubmit = (e) => {
       e.preventDefault();
@@ -6791,15 +6794,13 @@ const getQuickOverviewToneClass = (tone) => {
         setAuthNotice({ type: "error", message: "อุปกรณ์ออฟไลน์ กรุณาเชื่อมต่ออินเทอร์เน็ตก่อนสมัครใช้งาน" });
         return;
       }
-      const memberId = String(registerForm.memberId || "").trim();
       const prefix = String(registerForm.prefix || "").trim();
       const firstName = String(registerForm.firstName || "").trim();
       const lastName = String(registerForm.lastName || "").trim();
       const username = String(registerForm.username || "").trim();
-      const email = String(registerForm.email || "").trim();
       const pin = String(registerForm.pin || "").trim();
       const confirmPin = String(registerForm.confirmPin || "").trim();
-      if (!memberId || !firstName || !lastName || !username || !email || !pin || !confirmPin) {
+      if (!prefix || !firstName || !lastName || !username || !pin || !confirmPin) {
         setAuthNotice({ type: "error", message: "กรุณากรอกข้อมูลสมัครใช้งานให้ครบถ้วน" });
         return;
       }
@@ -6812,27 +6813,21 @@ const getQuickOverviewToneClass = (tone) => {
         return;
       }
       setIsRegistering(true);
-      setAuthNotice({ type: "loading", message: "กำลังบันทึกข้อมูลสมัครใช้งาน..." });
-      if (typeof google !== "undefined" && google.script && google.script.run) {
-        google.script.run.withSuccessHandler((response) => {
-          const result = typeof response === "string" ? { status: response } : response || {};
-          if (result.status === "Success") {
-            setRegisterForm({ memberId: "", prefix: "", firstName: "", lastName: "", username: "", email: "", pin: "", confirmPin: "" });
-            setEmailVerifyForm({ identifier: String((result == null ? void 0 : result.identifier) || username || "").trim(), otp: "" });
-            setAuthView("verifyEmail");
-            setAuthNotice({ type: "success", message: (result == null ? void 0 : result.message) || "สมัครใช้งานสำเร็จ กรุณาเปิดอีเมลเพื่อกดยืนยันบัญชี" });
-          } else {
-            setAuthNotice({ type: "error", message: (result == null ? void 0 : result.message) || "สมัครใช้งานไม่สำเร็จ" });
-          }
-          setIsRegistering(false);
-        }).withFailureHandler((error) => {
-          setAuthNotice({ type: "error", message: "สมัครใช้งานไม่สำเร็จ: " + (((error == null ? void 0 : error.message) || error || "ไม่ทราบสาเหตุ")) });
-          setIsRegistering(false);
-        }).registerUser(JSON.stringify(registerForm));
-      } else {
-        setAuthNotice({ type: "error", message: "ไม่สามารถเชื่อมต่อระบบเพื่อสมัครใช้งานได้" });
+      setAuthNotice({ type: "loading", message: "กำลังส่งคำขอสมัครใช้งาน..." });
+      callBackend("registerUser", JSON.stringify(registerForm)).then((response) => {
+        const result = typeof response === "string" ? { status: response } : response || {};
+        if (result.status === "Success") {
+          setRegisterForm({ prefix: "", firstName: "", lastName: "", username: "", pin: "", confirmPin: "" });
+          setAuthView("login");
+          setAuthNotice({ type: "success", message: (result == null ? void 0 : result.message) || "ส่งคำขอสมัครใช้งานแล้ว กรุณารอผู้ดูแลระบบอนุมัติ" });
+        } else {
+          setAuthNotice({ type: "error", message: (result == null ? void 0 : result.message) || "สมัครใช้งานไม่สำเร็จ" });
+        }
         setIsRegistering(false);
-      }
+      }).catch((error) => {
+        setAuthNotice({ type: "error", message: "สมัครใช้งานไม่สำเร็จ: " + (((error == null ? void 0 : error.message) || error || "ไม่ทราบสาเหตุ")) });
+        setIsRegistering(false);
+      });
     };
       const handleVerifyEmailOtpSubmit = (e) => {
       e.preventDefault();
@@ -8226,50 +8221,43 @@ const getQuickOverviewToneClass = (tone) => {
       };
       setUserAdminBusyId(user.userId);
       setUserAdminNotice({ type: "loading", message: `กำลังบันทึกผู้ใช้ ${user.username || ""}...` });
-      if (typeof google !== "undefined" && google.script && google.script.run) {
-        google.script.run.withSuccessHandler((response) => {
-          const result = parseBackendResponse(response);
-          if (result.status === "Error") {
-            setUserAdminNotice({ type: "error", message: result.message || "บันทึกข้อมูลผู้ใช้ไม่สำเร็จ" });
-            setUserAdminBusyId("");
-            return;
-          }
-          const parsedPermissionKeys = (() => {
-            const source = ((result == null ? void 0 : result.user) && (result == null ? void 0 : result.user.permissionsJson) !== undefined)
-              ? result.user.permissionsJson
-              : payload.permissionsJson;
-            if (!source) return Array.isArray((result == null ? void 0 : result.user) == null ? void 0 : result.user.permissions) ? result.user.permissions : [];
-            try {
-              const parsed = JSON.parse(source);
-              return Object.keys(parsed || {}).filter((key) => !!parsed[key]);
-            } catch (error) {
-              return Array.isArray((result == null ? void 0 : result.user) == null ? void 0 : result.user.permissions) ? result.user.permissions : [];
-            }
-          })();
-          const updatedUser = {
-            ...payload,
-            ...((result == null ? void 0 : result.user) || {}),
-            permissions: parsedPermissionKeys,
-            permissionsJson: ((result == null ? void 0 : result.user) && (result == null ? void 0 : result.user.permissionsJson) !== undefined) ? result.user.permissionsJson : payload.permissionsJson
-          };
-          setUserAdminRows((prevRows) => (prevRows || []).map((row) => row.userId === updatedUser.userId ? { ...row, ...updatedUser } : row));
-          clearBackendReadCache("userAdminList");
-          setUserAdminNotice({ type: "success", message: result.message || "บันทึกข้อมูลผู้ใช้เรียบร้อยแล้ว" });
-          if (isActiveSettingsWorkspaceItem("auditLogs") && canViewAuditLogs && auditLogLoaded) {
-            loadAuditLogRows(true);
-          }
+      callBackend("adminUpdateUserAccount", JSON.stringify(payload)).then((response) => {
+        const result = parseBackendResponse(response);
+        if (result.status === "Error") {
+          setUserAdminNotice({ type: "error", message: result.message || "บันทึกข้อมูลผู้ใช้ไม่สำเร็จ" });
           setUserAdminBusyId("");
-          setTimeout(() => setUserAdminNotice({ type: "idle", message: "" }), 4e3);
-        }).withFailureHandler((error) => {
-          setUserAdminNotice({ type: "error", message: "บันทึกข้อมูลผู้ใช้ไม่สำเร็จ: " + (((error == null ? void 0 : error.message) || error || "ไม่ทราบสาเหตุ")) });
-          setUserAdminBusyId("");
-        }).adminUpdateUserAccount(JSON.stringify(payload));
-      } else {
-        setUserAdminRows((prevRows) => (prevRows || []).map((row) => row.userId === payload.userId ? { ...row, ...payload } : row));
-        setUserAdminNotice({ type: "success", message: "โหมดทดสอบ: บันทึกข้อมูลผู้ใช้เรียบร้อยแล้ว" });
+          return;
+        }
+        const parsedPermissionKeys = (() => {
+          const source = ((result == null ? void 0 : result.user) && (result == null ? void 0 : result.user.permissionsJson) !== undefined)
+            ? result.user.permissionsJson
+            : payload.permissionsJson;
+          if (!source) return Array.isArray((result == null ? void 0 : result.user) == null ? void 0 : result.user.permissions) ? result.user.permissions : [];
+          try {
+            const parsed = JSON.parse(source);
+            return Object.keys(parsed || {}).filter((key) => !!parsed[key]);
+          } catch (error) {
+            return Array.isArray((result == null ? void 0 : result.user) == null ? void 0 : result.user.permissions) ? result.user.permissions : [];
+          }
+        })();
+        const updatedUser = {
+          ...payload,
+          ...((result == null ? void 0 : result.user) || {}),
+          permissions: parsedPermissionKeys,
+          permissionsJson: ((result == null ? void 0 : result.user) && (result == null ? void 0 : result.user.permissionsJson) !== undefined) ? result.user.permissionsJson : payload.permissionsJson
+        };
+        setUserAdminRows((prevRows) => (prevRows || []).map((row) => row.userId === updatedUser.userId ? { ...row, ...updatedUser } : row));
+        clearBackendReadCache("userAdminList");
+        setUserAdminNotice({ type: "success", message: result.message || "บันทึกข้อมูลผู้ใช้เรียบร้อยแล้ว" });
+        if (isActiveSettingsWorkspaceItem("auditLogs") && canViewAuditLogs && auditLogLoaded) {
+          loadAuditLogRows(true);
+        }
         setUserAdminBusyId("");
-        setTimeout(() => setUserAdminNotice({ type: "idle", message: "" }), 3e3);
-      }
+        setTimeout(() => setUserAdminNotice({ type: "idle", message: "" }), 4e3);
+      }).catch((error) => {
+        setUserAdminNotice({ type: "error", message: "บันทึกข้อมูลผู้ใช้ไม่สำเร็จ: " + (((error == null ? void 0 : error.message) || error || "ไม่ทราบสาเหตุ")) });
+        setUserAdminBusyId("");
+      });
     };
 
 const buildPermissionsJsonFromSelection = (selection) => {
@@ -12303,7 +12291,7 @@ const renderPaymentManagementGroup = (group, groupIndex) => /* @__PURE__ */ Reac
           : "border border-blue-200 bg-blue-50 text-blue-700";
       const tabClass = (view) => `flex-1 rounded-2xl px-4 py-3 text-sm font-bold transition ${authView === view ? "bg-slate-900 text-white shadow-lg shadow-slate-900/15" : "text-slate-500 hover:bg-white hover:text-slate-700"}`;
       const authNoticeBox = authNotice.type !== "idle" && /* @__PURE__ */ React.createElement("div", { className: `ai-auth-notice ai-auth-notice-${authNotice.type} rounded-2xl px-4 py-3 text-sm font-medium ${noticeClass}` }, authNotice.message);
-      const offlineAuthBox = !isOnline && /* @__PURE__ */ React.createElement("div", { className: "ai-offline-notice rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800" }, "อุปกรณ์ออฟไลน์อยู่ ขณะนี้สามารถกรอกข้อมูลได้ แต่การเข้าสู่ระบบหรือส่งลิงก์ทางอีเมลจะทำงานเมื่อเชื่อมต่ออินเทอร์เน็ตแล้วเท่านั้น");
+      const offlineAuthBox = !isOnline && /* @__PURE__ */ React.createElement("div", { className: "ai-offline-notice rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-800" }, "อุปกรณ์ออฟไลน์อยู่ ขณะนี้สามารถกรอกข้อมูลได้ แต่การเข้าสู่ระบบหรือส่งคำขอสมัครจะทำงานเมื่อเชื่อมต่ออินเทอร์เน็ตแล้วเท่านั้น");
       const loginForm = /* @__PURE__ */ React.createElement("form", { onSubmit: handleLogin, className: "space-y-5" }, [
         /* @__PURE__ */ React.createElement("div", { key: "user" }, [
           /* @__PURE__ */ React.createElement("label", { key: "label", className: "mb-2 block text-sm font-bold text-slate-700" }, "ชื่อผู้ใช้"),
@@ -12325,14 +12313,22 @@ const renderPaymentManagementGroup = (group, groupIndex) => /* @__PURE__ */ Reac
         /* @__PURE__ */ React.createElement("button", { key: "recover", type: "button", onClick: () => switchAuthView("adminRecovery"), className: "w-full rounded-2xl border border-rose-200 bg-rose-50 px-5 py-3 text-sm font-bold text-rose-700 transition hover:bg-rose-100" }, "กู้บัญชีแอดมินฉุกเฉิน")
       ]);
       const registerFormView = /* @__PURE__ */ React.createElement("form", { onSubmit: handleRegisterSubmit, className: "space-y-5" }, [
+        /* @__PURE__ */ React.createElement("div", { key: "intro", className: "rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-800" }, [
+          /* @__PURE__ */ React.createElement("p", { key: "title", className: "font-black" }, "ขั้นตอนสมัครใช้งานแบบใหม่"),
+          /* @__PURE__ */ React.createElement("p", { key: "desc" }, "กรอกข้อมูลให้ครบถ้วน ตั้งชื่อผู้ใช้และรหัสผ่าน จากนั้นระบบจะส่งบัญชีเข้าสู่คิวรออนุมัติของผู้ดูแลระบบทันที")
+        ]),
         /* @__PURE__ */ React.createElement("div", { key: "identity", className: "grid grid-cols-1 gap-4 sm:grid-cols-2" }, [
-          /* @__PURE__ */ React.createElement("div", { key: "memberId" }, [
-            /* @__PURE__ */ React.createElement("label", { key: "label", className: "mb-2 block text-sm font-bold text-slate-700" }, "รหัสสมาชิก"),
-            /* @__PURE__ */ React.createElement("input", { key: "input", type: "text", value: registerForm.memberId, onChange: (e) => updateRegisterForm("memberId", e.target.value), placeholder: "เช่น 00125", required: true, className: "w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100" })
-          ]),
           /* @__PURE__ */ React.createElement("div", { key: "prefix" }, [
-            /* @__PURE__ */ React.createElement("label", { key: "label", className: "mb-2 block text-sm font-bold text-slate-700" }, "คำนำหน้า (ถ้ามี)"),
-            /* @__PURE__ */ React.createElement("input", { key: "input", type: "text", value: registerForm.prefix, onChange: (e) => updateRegisterForm("prefix", e.target.value), placeholder: "นาย/นาง/น.ส.", autoComplete: "honorific-prefix", className: "w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100" })
+            /* @__PURE__ */ React.createElement("label", { key: "label", className: "mb-2 block text-sm font-bold text-slate-700" }, "คำนำหน้าชื่อ"),
+            /* @__PURE__ */ React.createElement("select", { key: "input", value: registerForm.prefix, onChange: (e) => updateRegisterForm("prefix", e.target.value), required: true, className: "w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100" }, [
+              /* @__PURE__ */ React.createElement("option", { key: "empty", value: "" }, "เลือกคำนำหน้าชื่อ"),
+              ["นาย", "นาง", "นางสาว", "เด็กหญิง", "เด็กชาย"].map((item) => /* @__PURE__ */ React.createElement("option", { key: item, value: item }, item))
+            ])
+          ]),
+          /* @__PURE__ */ React.createElement("div", { key: "username" }, [
+            /* @__PURE__ */ React.createElement("label", { key: "label", className: "mb-2 block text-sm font-bold text-slate-700" }, "Username"),
+            /* @__PURE__ */ React.createElement("input", { key: "input", type: "text", value: registerForm.username, onChange: (e) => updateRegisterForm("username", e.target.value), placeholder: "เช่น staff01", autoComplete: "username", autoCapitalize: "none", autoCorrect: "off", spellCheck: false, required: true, className: "w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100" }),
+            /* @__PURE__ */ React.createElement("p", { key: "hint", className: "mt-2 text-xs text-slate-500" }, "Username ต้องไม่ซ้ำกับผู้ใช้งานคนอื่น")
           ])
         ]),
         /* @__PURE__ */ React.createElement("div", { key: "name", className: "grid grid-cols-1 gap-4 sm:grid-cols-2" }, [
@@ -12345,79 +12341,34 @@ const renderPaymentManagementGroup = (group, groupIndex) => /* @__PURE__ */ Reac
             /* @__PURE__ */ React.createElement("input", { key: "input", type: "text", value: registerForm.lastName, onChange: (e) => updateRegisterForm("lastName", e.target.value), placeholder: "กรอกนามสกุล", autoComplete: "family-name", required: true, className: "w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100" })
           ])
         ]),
-        /* @__PURE__ */ React.createElement("div", { key: "user", className: "grid grid-cols-1 gap-4 sm:grid-cols-2" }, [
-          /* @__PURE__ */ React.createElement("div", { key: "username" }, [
-            /* @__PURE__ */ React.createElement("label", { key: "label", className: "mb-2 block text-sm font-bold text-slate-700" }, "ชื่อผู้ใช้"),
-            /* @__PURE__ */ React.createElement("input", { key: "input", type: "text", value: registerForm.username, onChange: (e) => updateRegisterForm("username", e.target.value), placeholder: "เช่น staff01", autoComplete: "username", autoCapitalize: "none", autoCorrect: "off", spellCheck: false, required: true, className: "w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100" })
-          ]),
-          /* @__PURE__ */ React.createElement("div", { key: "email" }, [
-            /* @__PURE__ */ React.createElement("label", { key: "label", className: "mb-2 block text-sm font-bold text-slate-700" }, "อีเมล"),
-            /* @__PURE__ */ React.createElement("input", { key: "input", type: "email", value: registerForm.email, onChange: (e) => updateRegisterForm("email", e.target.value), placeholder: "example@email.com", autoComplete: "email", autoCapitalize: "none", autoCorrect: "off", spellCheck: false, required: true, inputMode: "email", className: "w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100" })
-          ])
-        ]),
         /* @__PURE__ */ React.createElement("div", { key: "passwords", className: "grid grid-cols-1 gap-4 sm:grid-cols-2" }, [
           /* @__PURE__ */ React.createElement("div", { key: "password" }, [
-            /* @__PURE__ */ React.createElement("label", { key: "label", className: "mb-2 block text-sm font-bold text-slate-700" }, "รหัสผ่าน"),
+            /* @__PURE__ */ React.createElement("label", { key: "label", className: "mb-2 block text-sm font-bold text-slate-700" }, "Password"),
             /* @__PURE__ */ React.createElement("input", { key: "input", type: "password", value: registerForm.pin, onChange: (e) => updateRegisterForm("pin", e.target.value), placeholder: "อย่างน้อย 8 ตัวอักษร", autoComplete: "new-password", required: true, className: "w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100" })
           ]),
           /* @__PURE__ */ React.createElement("div", { key: "confirm" }, [
-            /* @__PURE__ */ React.createElement("label", { key: "label", className: "mb-2 block text-sm font-bold text-slate-700" }, "ยืนยันรหัสผ่าน"),
+            /* @__PURE__ */ React.createElement("label", { key: "label", className: "mb-2 block text-sm font-bold text-slate-700" }, "ยืนยัน Password"),
             /* @__PURE__ */ React.createElement("input", { key: "input", type: "password", value: registerForm.confirmPin, onChange: (e) => updateRegisterForm("confirmPin", e.target.value), placeholder: "กรอกรหัสผ่านอีกครั้ง", autoComplete: "new-password", required: true, className: "w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100" })
           ])
         ]),
         /* @__PURE__ */ React.createElement("button", { key: "submit", type: "submit", disabled: isRegistering || !isOnline, className: "inline-flex w-full items-center justify-center rounded-2xl bg-blue-600 px-5 py-3.5 text-sm font-black text-white shadow-xl shadow-blue-600/20 transition hover:-translate-y-0.5 hover:bg-blue-700 disabled:opacity-60" }, [
           isRegistering ? /* @__PURE__ */ React.createElement(Loader2, { key: "spin", className: "mr-2 h-5 w-5 animate-spin" }) : /* @__PURE__ */ React.createElement(UserCheck, { key: "icon", className: "mr-2 h-5 w-5" }),
-          "สมัครใช้งาน"
+          "ส่งคำขอสมัครใช้งาน"
         ]),
-        /* @__PURE__ */ React.createElement("p", { key: "note", className: "text-xs leading-6 text-slate-500" }, "ชื่อผู้สมัครต้องตรงกับข้อมูลสมาชิกตามรหัสสมาชิกในฐานข้อมูล และต้องยืนยันอีเมลก่อนเข้าใช้งาน")
+        /* @__PURE__ */ React.createElement("p", { key: "note", className: "text-xs leading-6 text-slate-500" }, "หลังลงทะเบียน บัญชีจะอยู่ในสถานะรออนุมัติ และจะเข้าสู่ระบบได้เมื่อผู้ดูแลระบบอนุมัติแล้วเท่านั้น")
       ]);
-      const forgotFormView = /* @__PURE__ */ React.createElement("div", { className: "space-y-5" }, [
-        /* @__PURE__ */ React.createElement("form", { key: "link", onSubmit: handleRequestResetOtp, className: "space-y-4 rounded-3xl border border-slate-200 bg-slate-50 p-4" }, [
-          /* @__PURE__ */ React.createElement("div", { key: "identifier" }, [
-            /* @__PURE__ */ React.createElement("label", { key: "label", className: "mb-2 block text-sm font-bold text-slate-700" }, "ชื่อผู้ใช้ หรือ อีเมล"),
-            /* @__PURE__ */ React.createElement("input", { key: "input", type: "text", value: forgotForm.identifier, onChange: (e) => updateForgotForm("identifier", e.target.value), placeholder: "กรอกชื่อผู้ใช้หรืออีเมลที่ลงทะเบียนไว้", autoCapitalize: "none", autoCorrect: "off", spellCheck: false, required: true, className: "w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-sm font-medium text-slate-700 outline-none transition focus:border-amber-400 focus:ring-4 focus:ring-amber-100" })
-          ]),
-          /* @__PURE__ */ React.createElement("button", { key: "submit", type: "submit", disabled: isRequestingReset || !isOnline, className: "inline-flex w-full items-center justify-center rounded-2xl border border-amber-200 bg-amber-100 px-5 py-3 text-sm font-black text-amber-800 transition hover:bg-amber-200 disabled:opacity-60" }, [
-            isRequestingReset ? /* @__PURE__ */ React.createElement(Loader2, { key: "spin", className: "mr-2 h-5 w-5 animate-spin" }) : /* @__PURE__ */ React.createElement(Sparkles, { key: "icon", className: "mr-2 h-5 w-5" }),
-            "ส่งลิงก์ตั้งรหัสผ่านใหม่"
-          ])
+      const forgotFormView = /* @__PURE__ */ React.createElement("div", { className: "space-y-4" }, [
+        /* @__PURE__ */ React.createElement("div", { key: "info", className: "rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900" }, [
+          /* @__PURE__ */ React.createElement("p", { key: "title", className: "font-black" }, "การรีเซ็ตรหัสผ่านในรูปแบบใหม่"),
+          /* @__PURE__ */ React.createElement("p", { key: "desc1", className: "mt-2" }, "หากลืมรหัสผ่าน กรุณาติดต่อผู้ดูแลระบบให้ช่วยรีเซ็ตบัญชีหรือปรับสิทธิ์การใช้งานให้"),
+          /* @__PURE__ */ React.createElement("p", { key: "desc2", className: "mt-2" }, "แนวทางนี้ช่วยลดการพึ่งพา flow อีเมลเดิมและสอดคล้องกับการถอด GAS backend ในอนาคต")
         ]),
-        /* @__PURE__ */ React.createElement("form", { key: "reset", onSubmit: handleResetPasswordSubmit, className: "space-y-4" }, [
-          /* @__PURE__ */ React.createElement("div", { key: "token" }, [
-            /* @__PURE__ */ React.createElement("label", { key: "label", className: "mb-2 block text-sm font-bold text-slate-700" }, "โทเค็นจากลิงก์อีเมล"),
-            /* @__PURE__ */ React.createElement("input", { key: "input", type: "text", value: forgotForm.otp, onChange: (e) => updateForgotForm("otp", e.target.value), placeholder: "ระบบจะกรอกให้อัตโนมัติเมื่อเปิดลิงก์จากอีเมล", required: true, className: "w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-sm font-medium text-slate-700 outline-none transition focus:border-amber-400 focus:ring-4 focus:ring-amber-100" })
-          ]),
-          /* @__PURE__ */ React.createElement("div", { key: "passwords", className: "grid grid-cols-1 gap-4 sm:grid-cols-2" }, [
-            /* @__PURE__ */ React.createElement("div", { key: "password" }, [
-              /* @__PURE__ */ React.createElement("label", { key: "label", className: "mb-2 block text-sm font-bold text-slate-700" }, "รหัสผ่านใหม่"),
-              /* @__PURE__ */ React.createElement("input", { key: "input", type: "password", value: forgotForm.newPin, onChange: (e) => updateForgotForm("newPin", e.target.value), placeholder: "อย่างน้อย 8 ตัวอักษร", autoComplete: "new-password", required: true, className: "w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-sm font-medium text-slate-700 outline-none transition focus:border-amber-400 focus:ring-4 focus:ring-amber-100" })
-            ]),
-            /* @__PURE__ */ React.createElement("div", { key: "confirm" }, [
-              /* @__PURE__ */ React.createElement("label", { key: "label", className: "mb-2 block text-sm font-bold text-slate-700" }, "ยืนยันรหัสผ่านใหม่"),
-              /* @__PURE__ */ React.createElement("input", { key: "input", type: "password", value: forgotForm.confirmPin, onChange: (e) => updateForgotForm("confirmPin", e.target.value), placeholder: "กรอกรหัสผ่านอีกครั้ง", autoComplete: "new-password", required: true, className: "w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-sm font-medium text-slate-700 outline-none transition focus:border-amber-400 focus:ring-4 focus:ring-amber-100" })
-            ])
-          ]),
-          /* @__PURE__ */ React.createElement("button", { key: "submit", type: "submit", disabled: isResettingPassword || !isOnline, className: "inline-flex w-full items-center justify-center rounded-2xl bg-amber-500 px-5 py-3.5 text-sm font-black text-white shadow-xl shadow-amber-500/20 transition hover:-translate-y-0.5 hover:bg-amber-600 disabled:opacity-60" }, [
-            isResettingPassword ? /* @__PURE__ */ React.createElement(Loader2, { key: "spin", className: "mr-2 h-5 w-5 animate-spin" }) : /* @__PURE__ */ React.createElement(Lock, { key: "icon", className: "mr-2 h-5 w-5" }),
-            "ตั้งรหัสผ่านใหม่"
-          ]),
-          /* @__PURE__ */ React.createElement("p", { key: "note", className: "text-xs leading-6 text-slate-500" }, "เมื่อกดลิงก์จากอีเมล ระบบจะกรอกโทเค็นให้อัตโนมัติ และลิงก์มีอายุ 15 นาที")
-        ])
+        /* @__PURE__ */ React.createElement("button", { key: "back", type: "button", onClick: () => switchAuthView("login"), className: "w-full rounded-2xl border border-slate-200 px-5 py-3 text-sm font-bold text-slate-600 transition hover:bg-slate-50" }, "กลับหน้าเข้าสู่ระบบ")
       ]);
-      const verifyEmailFormView = /* @__PURE__ */ React.createElement("form", { onSubmit: handleVerifyEmailOtpSubmit, className: "space-y-4" }, [
-        /* @__PURE__ */ React.createElement("div", { key: "identifier" }, [
-          /* @__PURE__ */ React.createElement("label", { key: "label", className: "mb-2 block text-sm font-bold text-slate-700" }, "ชื่อผู้ใช้ หรือ อีเมล"),
-          /* @__PURE__ */ React.createElement("input", { key: "input", type: "text", value: emailVerifyForm.identifier, onChange: (e) => updateEmailVerifyForm("identifier", e.target.value), placeholder: "กรอกชื่อผู้ใช้หรืออีเมลที่ใช้สมัคร", autoCapitalize: "none", autoCorrect: "off", spellCheck: false, required: true, className: "w-full rounded-2xl border border-slate-300 bg-white px-4 py-3.5 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-400 focus:ring-4 focus:ring-blue-100" })
-        ]),
-        /* @__PURE__ */ React.createElement("div", { key: "actions", className: "grid grid-cols-1 gap-3 sm:grid-cols-2" }, [
-          /* @__PURE__ */ React.createElement("button", { key: "verify", type: "submit", disabled: isVerifyingEmail || !isOnline, className: "inline-flex w-full items-center justify-center rounded-2xl bg-blue-600 px-5 py-3.5 text-sm font-black text-white shadow-xl shadow-blue-600/20 transition hover:-translate-y-0.5 hover:bg-blue-700 disabled:opacity-60" }, [
-            isVerifyingEmail ? /* @__PURE__ */ React.createElement(Loader2, { key: "spin", className: "mr-2 h-5 w-5 animate-spin" }) : /* @__PURE__ */ React.createElement(CheckCircle2, { key: "icon", className: "mr-2 h-5 w-5" }),
-            "ส่งลิงก์ยืนยันอีเมล"
-          ]),
-          /* @__PURE__ */ React.createElement("button", { key: "resend", type: "button", onClick: handleResendEmailOtp, disabled: isResendingEmailOtp || !isOnline, className: "inline-flex w-full items-center justify-center rounded-2xl border border-blue-200 bg-blue-50 px-5 py-3.5 text-sm font-black text-blue-700 transition hover:bg-blue-100 disabled:opacity-60" }, [
-            isResendingEmailOtp ? /* @__PURE__ */ React.createElement(Loader2, { key: "spin", className: "mr-2 h-5 w-5 animate-spin" }) : /* @__PURE__ */ React.createElement(Sparkles, { key: "icon", className: "mr-2 h-5 w-5" }),
-            "ส่งลิงก์ใหม่"
-          ])
+      const verifyEmailFormView = /* @__PURE__ */ React.createElement("div", { className: "space-y-4" }, [
+        /* @__PURE__ */ React.createElement("div", { key: "info", className: "rounded-3xl border border-blue-200 bg-blue-50 p-4 text-sm leading-6 text-blue-900" }, [
+          /* @__PURE__ */ React.createElement("p", { key: "title", className: "font-black" }, "บัญชีใหม่จะเข้าสู่คิวรออนุมัติ"),
+          /* @__PURE__ */ React.createElement("p", { key: "desc" }, "รูปแบบล่าสุดไม่บังคับให้ยืนยันอีเมลก่อนเข้าใช้งานแล้ว หลังส่งคำขอสมัคร ระบบจะรอให้ผู้ดูแลระบบตรวจสอบและอนุมัติบัญชีแทน")
         ]),
         /* @__PURE__ */ React.createElement("button", { key: "back", type: "button", onClick: () => switchAuthView("login"), className: "w-full rounded-2xl border border-slate-200 px-5 py-3 text-sm font-bold text-slate-600 transition hover:bg-slate-50" }, "กลับหน้าเข้าสู่ระบบ")
       ]);
@@ -12452,16 +12403,16 @@ const renderPaymentManagementGroup = (group, groupIndex) => /* @__PURE__ */ Reac
               "Secure Login"
             ]),
             /* @__PURE__ */ React.createElement("h1", { key: "title", className: "mt-6 text-4xl font-black leading-tight tracking-tight" }, "ระบบจัดการเงินกู้ และรับชำระเงิน"),
-            /* @__PURE__ */ React.createElement("p", { key: "desc", className: "mt-4 max-w-xl text-sm leading-7 text-emerald-50/90" }, "หน้าเข้าสู่ระบบใหม่นี้รองรับ username/password, สมัครด้วยรหัสสมาชิกจริง, ยืนยันอีเมล, และตั้งรหัสผ่านใหม่ผ่านลิงก์อีเมล")
+            /* @__PURE__ */ React.createElement("p", { key: "desc", className: "mt-4 max-w-xl text-sm leading-7 text-emerald-50/90" }, "หน้าเข้าสู่ระบบใหม่นี้รองรับการสมัครแบบขออนุมัติ กำหนด Username/Password แบบเข้ารหัส และแยกงานอนุมัติไว้ให้ผู้ดูแลระบบจัดการได้ชัดเจน")
           ]),
           /* @__PURE__ */ React.createElement("div", { key: "bottom", className: "grid grid-cols-1 gap-4" }, [
             /* @__PURE__ */ React.createElement("div", { key: "feature1", className: "rounded-3xl border border-white/10 bg-white/10 p-5 backdrop-blur-sm" }, [
               /* @__PURE__ */ React.createElement("p", { key: "title", className: "text-sm font-black text-white" }, "ปลอดภัยขึ้น"),
-              /* @__PURE__ */ React.createElement("p", { key: "desc", className: "mt-2 text-sm leading-6 text-emerald-50/90" }, "รหัสผ่านและโทเค็นยืนยันถูกเก็บแบบ Hash พร้อมจำกัดการลองเข้าสู่ระบบผิด")
+              /* @__PURE__ */ React.createElement("p", { key: "desc", className: "mt-2 text-sm leading-6 text-emerald-50/90" }, "รหัสผ่านถูกเก็บแบบเข้ารหัส พร้อมจำกัดการลองเข้าสู่ระบบผิดและบล็อกบัญชีที่ยังไม่อนุมัติ")
             ]),
             /* @__PURE__ */ React.createElement("div", { key: "feature2", className: "rounded-3xl border border-white/10 bg-white/10 p-5 backdrop-blur-sm" }, [
               /* @__PURE__ */ React.createElement("p", { key: "title", className: "text-sm font-black text-white" }, "ดูแลง่ายขึ้น"),
-              /* @__PURE__ */ React.createElement("p", { key: "desc", className: "mt-2 text-sm leading-6 text-emerald-50/90" }, "ข้อมูลผู้ใช้แยกเก็บในชีตเดียว ทำให้ backup, audit และแก้ไขโครงสร้างภายหลังได้ง่าย")
+              /* @__PURE__ */ React.createElement("p", { key: "desc", className: "mt-2 text-sm leading-6 text-emerald-50/90" }, "ผู้สมัครใหม่จะเข้าสู่คิวรออนุมัติทันที ทำให้ทีมผู้ดูแลควบคุมการเปิดใช้งานบัญชีได้ปลอดภัยขึ้น")
             ])
           ])
         ]),
@@ -12469,7 +12420,7 @@ const renderPaymentManagementGroup = (group, groupIndex) => /* @__PURE__ */ Reac
           /* @__PURE__ */ React.createElement("div", { key: "mobileHero", className: "mb-6 lg:hidden" }, [
             /* @__PURE__ */ React.createElement("div", { key: "logo", className: "inline-flex items-center rounded-2xl bg-emerald-100 p-3 text-emerald-700" }, /* @__PURE__ */ React.createElement(ShieldCheck, { className: "h-7 w-7" })),
             /* @__PURE__ */ React.createElement("h2", { key: "title", className: "mt-4 text-2xl font-black tracking-tight text-slate-900" }, "เข้าสู่ระบบ / สมัครใช้งาน"),
-            /* @__PURE__ */ React.createElement("p", { key: "desc", className: "mt-2 text-sm leading-6 text-slate-500" }, "รองรับการยืนยันอีเมลและการตั้งรหัสผ่านใหม่จากหน้าเดียว")
+            /* @__PURE__ */ React.createElement("p", { key: "desc", className: "mt-2 text-sm leading-6 text-slate-500" }, "สมัครใช้งานด้วยชื่อจริง ตั้ง Username/Password แล้วรอผู้ดูแลระบบอนุมัติบัญชี")
           ]),
           /* @__PURE__ */ React.createElement("div", { key: "tabs", className: "auth-ai-tabs rounded-3xl bg-slate-100 p-2" }, /* @__PURE__ */ React.createElement("div", { className: "flex flex-col gap-2 sm:flex-row" }, [
             /* @__PURE__ */ React.createElement("button", { key: "login", type: "button", onClick: () => switchAuthView("login"), className: tabClass("login") }, "เข้าสู่ระบบ"),
@@ -12478,8 +12429,8 @@ const renderPaymentManagementGroup = (group, groupIndex) => /* @__PURE__ */ Reac
           ])),
           /* @__PURE__ */ React.createElement("div", { key: "body", className: "auth-ai-form-panel mt-6 rounded-[2rem] border border-slate-200 bg-white p-5 shadow-sm sm:p-6" }, [
             /* @__PURE__ */ React.createElement("div", { key: "titleWrap", className: "mb-5" }, [
-              /* @__PURE__ */ React.createElement("h3", { key: "title", className: "text-xl font-black tracking-tight text-slate-900" }, authView === "login" ? "เข้าสู่ระบบ" : authView === "register" ? "สมัครใช้งาน" : authView === "verifyEmail" ? "ยืนยันอีเมล" : authView === "adminRecovery" ? "กู้บัญชีแอดมิน" : "ลืมรหัสผ่าน"),
-              /* @__PURE__ */ React.createElement("p", { key: "desc", className: "mt-1 text-sm leading-6 text-slate-500" }, authView === "login" ? "เข้าสู่ระบบด้วยชื่อผู้ใช้และรหัสผ่าน โดยบัญชีต้องยืนยันอีเมลแล้ว" : authView === "register" ? "สมัครด้วยข้อมูลสมาชิกจริง ชื่อ-สกุลต้องตรงกับรหัสสมาชิก และรออีเมลยืนยัน" : authView === "verifyEmail" ? "กรอกชื่อผู้ใช้หรืออีเมล แล้วระบบจะส่งลิงก์ยืนยันไปทางอีเมล" : authView === "adminRecovery" ? "กรอก Recovery Key เพื่อตั้ง PIN ใหม่และปลดล็อกบัญชี admin" : "ขอลิงก์ทางอีเมล แล้วกำหนดรหัสผ่านใหม่จากหน้านี้")
+              /* @__PURE__ */ React.createElement("h3", { key: "title", className: "text-xl font-black tracking-tight text-slate-900" }, authView === "login" ? "เข้าสู่ระบบ" : authView === "register" ? "สมัครใช้งาน" : authView === "verifyEmail" ? "แจ้งเตือนการยืนยัน" : authView === "adminRecovery" ? "กู้บัญชีแอดมิน" : "ลืมรหัสผ่าน"),
+              /* @__PURE__ */ React.createElement("p", { key: "desc", className: "mt-1 text-sm leading-6 text-slate-500" }, authView === "login" ? "เข้าสู่ระบบด้วย Username และ Password โดยบัญชีที่ยังไม่อนุมัติจะยังไม่สามารถใช้งานได้" : authView === "register" ? "กรอกคำนำหน้าชื่อ ชื่อ สกุล Username และ Password จากนั้นรอผู้ดูแลระบบอนุมัติบัญชี" : authView === "verifyEmail" ? "รูปแบบใหม่ไม่บังคับยืนยันอีเมลก่อนสมัคร บัญชีจะเข้าสู่คิวรออนุมัติแทน" : authView === "adminRecovery" ? "กรอก Recovery Key เพื่อตั้ง PIN ใหม่และปลดล็อกบัญชี admin" : "หากลืมรหัสผ่าน กรุณาติดต่อผู้ดูแลระบบหรือใช้อีเมลกู้คืนที่ผูกไว้ภายหลัง")
             ]),
             offlineAuthBox,
             authNoticeBox,

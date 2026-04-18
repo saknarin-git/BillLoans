@@ -36,6 +36,7 @@ const DEFAULT_INTEREST_RATE = 12;
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOGIN_LOCKOUT_SECONDS = 15 * 60;
+const APPROVED_NAME_PREFIXES = ["นาย", "นาง", "นางสาว", "เด็กหญิง", "เด็กชาย"] as const;
 
 const loginAttemptState = new Map<
   string,
@@ -124,10 +125,45 @@ const normalizeUserStatus = (value: unknown) => {
   if (["suspended", "banned", "disabled", "inactive"].includes(lower)) {
     return USER_STATUS_SUSPENDED;
   }
-  if (["pending", "waiting", "awaiting_approval"].includes(lower)) {
+  if (["pending", "waiting", "awaiting_approval", "รออนุมัติ"].includes(lower)) {
     return USER_STATUS_PENDING;
   }
   return status;
+};
+
+const normalizeApprovedPrefix = (value: unknown) => {
+  const normalized = normalizeText(value);
+  return APPROVED_NAME_PREFIXES.includes(
+    normalized as (typeof APPROVED_NAME_PREFIXES)[number],
+  )
+    ? normalized
+    : "";
+};
+
+const normalizeHumanNamePart = (value: unknown) =>
+  normalizeText(value).replace(/\s+/g, " ").trim();
+
+const buildHumanFullName = (
+  prefix: unknown,
+  firstName: unknown,
+  lastName: unknown,
+) => {
+  const parts = [
+    normalizeApprovedPrefix(prefix),
+    normalizeHumanNamePart(firstName),
+    normalizeHumanNamePart(lastName),
+  ].filter(Boolean);
+  return parts.join(" ").trim();
+};
+
+const isStrongPasswordInput = (value: unknown) => {
+  const text = normalizeText(value);
+  return text.length >= 8 || isValidSixDigitPin(text);
+};
+
+const sanitizePermissionsJsonText = (value: unknown) => {
+  const normalized = parsePermissionsJson(value);
+  return JSON.stringify(normalized);
 };
 
 const getPermissionCatalog = () =>
@@ -1961,11 +1997,44 @@ const findUserByUsername = async (username: unknown) => {
   if (!normalizedUsername) return null;
   const rows = await callSupabase("app_users", {
     select:
-      "user_id,username,full_name,email,role,status,email_verified_at_text,pin_hash,pin_unique_key,permissions_json,last_login_at_text,updated_at_text",
+      "user_id,username,full_name,email,role,status,email_verified_at_text,password_hash,pin_hash,pin_unique_key,permissions_json,last_login_at_text,updated_at_text,prefix,first_name,last_name",
     username: `eq.${normalizedUsername}`,
     limit: "1",
   });
   return rows[0] || null;
+};
+
+const findUserById = async (userId: unknown) => {
+  const normalizedUserId = normalizeText(userId);
+  if (!normalizedUserId) return null;
+  const rows = await callSupabase("app_users", {
+    select:
+      "user_id,username,full_name,email,role,status,email_verified_at_text,password_hash,pin_hash,pin_unique_key,permissions_json,last_login_at_text,updated_at_text,prefix,first_name,last_name",
+    user_id: `eq.${normalizedUserId}`,
+    limit: "1",
+  });
+  return rows[0] || null;
+};
+
+const mapUserRowForClient = (userRow: SupabaseRow | null) => {
+  if (!userRow) return null;
+  const role = normalizeRole(userRow.role);
+  return {
+    userId: normalizeText(userRow.user_id),
+    username: normalizeText(userRow.username),
+    fullName: normalizeText(userRow.full_name),
+    email: normalizeLower(userRow.email),
+    prefix: normalizeText(userRow.prefix),
+    firstName: normalizeText(userRow.first_name),
+    lastName: normalizeText(userRow.last_name),
+    emailVerifiedAt: normalizeText(userRow.email_verified_at_text),
+    role,
+    status: normalizeUserStatus(userRow.status),
+    updatedAt: normalizeText(userRow.updated_at_text),
+    lastLoginAt: normalizeText(userRow.last_login_at_text),
+    permissionsJson: normalizeText(userRow.permissions_json),
+    permissions: getEffectivePermissions(userRow, role),
+  } as JsonObject;
 };
 
 const findUserByLoginPin = async (pinValue: unknown) => {
@@ -2007,6 +2076,372 @@ const findUserByLoginPin = async (pinValue: unknown) => {
     matchedUser = user;
   }
   return matchedUser;
+};
+
+const verifyLogin = async (payload: RpcPayload) => {
+  const username = normalizeLower(payload.args?.[0]);
+  const password = normalizeText(payload.args?.[1]);
+
+  if (!username || !password) {
+    return {
+      status: "Error",
+      message: "กรุณากรอกชื่อผู้ใช้และรหัสผ่าน",
+    } as JsonObject;
+  }
+
+  if (getLoginLockoutState(username).locked) {
+    return {
+      status: "Locked",
+      message: "พยายามเข้าสู่ระบบผิดเกินกำหนด กรุณารอ 15 นาทีแล้วลองใหม่อีกครั้ง",
+    } as JsonObject;
+  }
+
+  const userRecord = await findUserByUsername(username);
+  const storedPasswordHash = normalizeText(userRecord?.password_hash) ||
+    normalizeText(userRecord?.pin_hash);
+  if (!userRecord || !storedPasswordHash) {
+    const failedState = registerFailedLoginAttempt(username);
+    return {
+      status: failedState.locked ? "Locked" : "Error",
+      message: failedState.locked
+        ? "พยายามเข้าสู่ระบบผิดเกินกำหนด กรุณารอ 15 นาทีแล้วลองใหม่อีกครั้ง"
+        : "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง",
+    } as JsonObject;
+  }
+
+  const normalizedStatus = normalizeUserStatus(
+    userRecord.status || USER_STATUS_PENDING,
+  );
+  if (normalizedStatus !== USER_STATUS_ACTIVE) {
+    return {
+      status: "Error",
+      message: normalizedStatus === USER_STATUS_PENDING
+        ? "บัญชีของคุณอยู่ระหว่างรออนุมัติจากผู้ดูแลระบบ"
+        : "บัญชีผู้ใช้นี้ถูกระงับการใช้งาน กรุณาติดต่อผู้ดูแลระบบ",
+    } as JsonObject;
+  }
+
+  const passwordMatched = await verifyPasswordAgainstStoredHash(
+    password,
+    storedPasswordHash,
+  );
+  if (!passwordMatched) {
+    const failedState = registerFailedLoginAttempt(username);
+    return {
+      status: failedState.locked ? "Locked" : "Error",
+      message: failedState.locked
+        ? "พยายามเข้าสู่ระบบผิดเกินกำหนด กรุณารอ 15 นาทีแล้วลองใหม่อีกครั้ง"
+        : "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง",
+    } as JsonObject;
+  }
+
+  const permissions = getEffectivePermissions(
+    userRecord,
+    normalizeRole(userRecord.role),
+  );
+  const loginAt = formatThaiDateTime(new Date());
+  try {
+    await patchSupabaseRows(
+      "app_users",
+      { user_id: `eq.${normalizeText(userRecord.user_id)}` },
+      {
+        last_login_at_text: loginAt,
+        updated_at_text: loginAt,
+      },
+    );
+  } catch {
+    // Keep login successful even if timestamps cannot be updated.
+  }
+
+  clearFailedLoginAttempts(username);
+
+  const authenticatedSession: SessionData = {
+    userId: normalizeText(userRecord.user_id),
+    username: normalizeText(userRecord.username),
+    fullName: normalizeText(userRecord.full_name) ||
+      normalizeText(userRecord.username),
+    role: normalizeRole(userRecord.role),
+    issuedAt: new Date().toISOString(),
+    email: normalizeLower(userRecord.email),
+    permissions,
+    staffPortalUnlocked: false,
+    staffPortalUnlockedAt: "",
+  };
+  const sessionToken = await encodeSessionToken(authenticatedSession);
+  return {
+    status: "Success",
+    username: authenticatedSession.username,
+    fullName: authenticatedSession.fullName,
+    email: normalizeText(userRecord.email),
+    role: authenticatedSession.role || "staff",
+    permissions,
+    permissionCatalog: getPermissionCatalog(),
+    staffPortalUnlocked: false,
+    staffPortalUnlockedAt: "",
+    sessionToken,
+    backendMode: "supabase-edge-function",
+  } as JsonObject;
+};
+
+const registerUser = async (payload: RpcPayload) => {
+  const rawArg = payload.args?.[0];
+  const form = typeof rawArg === "string"
+    ? normalizeSettingsInputObject(JSON.parse(rawArg || "{}"))
+    : normalizeSettingsInputObject(rawArg);
+
+  const prefix = normalizeApprovedPrefix(form.prefix);
+  const firstName = normalizeHumanNamePart(form.firstName);
+  const lastName = normalizeHumanNamePart(form.lastName);
+  const fullName = buildHumanFullName(prefix, firstName, lastName);
+  const username = normalizeLower(form.username);
+  const password = normalizeText(form.password || form.pin);
+  const confirmPassword = normalizeText(
+    form.confirmPassword || form.confirmPin,
+  );
+
+  if (!prefix) {
+    return { status: "Error", message: "กรุณาเลือกคำนำหน้าชื่อ" } as JsonObject;
+  }
+  if (!firstName) {
+    return { status: "Error", message: "กรุณากรอกชื่อ" } as JsonObject;
+  }
+  if (!lastName) {
+    return { status: "Error", message: "กรุณากรอกสกุล" } as JsonObject;
+  }
+  if (!fullName) {
+    return { status: "Error", message: "กรุณากรอกชื่อและสกุลให้ครบถ้วน" } as JsonObject;
+  }
+  if (!username || username.length < 4) {
+    return { status: "Error", message: "ชื่อผู้ใช้ต้องยาวอย่างน้อย 4 ตัวอักษร" } as JsonObject;
+  }
+  if (!/^[a-zA-Z0-9._-]+$/.test(username)) {
+    return {
+      status: "Error",
+      message: "ชื่อผู้ใช้ใช้ได้เฉพาะภาษาอังกฤษ ตัวเลข จุด ขีด และขีดล่าง",
+    } as JsonObject;
+  }
+  if (!isStrongPasswordInput(password)) {
+    return {
+      status: "Error",
+      message: "รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร หรือใช้ PIN 6 หลัก",
+    } as JsonObject;
+  }
+  if (password !== confirmPassword) {
+    return { status: "Error", message: "ยืนยันรหัสผ่านไม่ตรงกัน" } as JsonObject;
+  }
+
+  const existingUser = await findUserByUsername(username);
+  if (existingUser) {
+    return { status: "Error", message: "ชื่อผู้ใช้นี้ถูกใช้งานแล้ว" } as JsonObject;
+  }
+
+  const passwordHash = await createHashRecord(password);
+  const pinUniqueKey = isValidSixDigitPin(password)
+    ? await computePinUniqueKey(password)
+    : "";
+  if (pinUniqueKey) {
+    const duplicatePinRows = await callSupabase("app_users", {
+      select: "user_id",
+      pin_unique_key: `eq.${pinUniqueKey}`,
+      limit: "1",
+    });
+    if (duplicatePinRows.length > 0) {
+      return {
+        status: "Error",
+        message: "รหัสผ่านแบบ PIN นี้ถูกใช้งานแล้ว กรุณาเปลี่ยนเป็นค่าอื่น",
+      } as JsonObject;
+    }
+  }
+
+  const nowText = formatThaiDateTime(new Date());
+  await insertSupabaseRows("app_users", {
+    user_id: crypto.randomUUID(),
+    username,
+    full_name: fullName,
+    email: "",
+    password_hash: passwordHash,
+    role: "staff",
+    status: USER_STATUS_PENDING,
+    created_at_text: nowText,
+    updated_at_text: nowText,
+    last_login_at_text: "",
+    reset_otp_hash: "",
+    reset_otp_expire_at_text: "",
+    reset_otp_requested_at_text: "",
+    reset_otp_used_at_text: "",
+    permissions_json: "",
+    prefix,
+    first_name: firstName,
+    last_name: lastName,
+    email_verified_at_text: "",
+    pin_hash: passwordHash,
+    pin_unique_key: pinUniqueKey,
+    pin_updated_at_text: nowText,
+    email_verify_otp_hash: "",
+    email_verify_otp_expire_at_text: "",
+    email_verify_otp_requested_at_text: "",
+    raw_json: {
+      registrationSource: "web-signup-approval-flow",
+      approvalRequired: true,
+    },
+    imported_at: new Date().toISOString(),
+  });
+
+  return {
+    status: "Success",
+    message: "ส่งคำขอสมัครใช้งานเรียบร้อยแล้ว กรุณารอผู้ดูแลระบบอนุมัติก่อนเข้าสู่ระบบ",
+    requiresApproval: true,
+    identifier: username,
+  } as JsonObject;
+};
+
+const updateCurrentUserProfile = async (payload: RpcPayload) => {
+  const { session } = await resolveSession(payload);
+  const rawArg = payload.args?.[0];
+  const form = typeof rawArg === "string"
+    ? normalizeSettingsInputObject(JSON.parse(rawArg || "{}"))
+    : normalizeSettingsInputObject(rawArg);
+  const email = normalizeLower(form.email);
+
+  if (!email) {
+    return { status: "Error", message: "กรุณากรอกอีเมล" } as JsonObject;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return { status: "Error", message: "รูปแบบอีเมลไม่ถูกต้อง" } as JsonObject;
+  }
+
+  const currentUser = await findUserByUsername(session.username);
+  if (!currentUser) {
+    return { status: "Error", message: "ไม่พบบัญชีผู้ใช้งานในระบบ" } as JsonObject;
+  }
+
+  const existingEmailRows = await callSupabase("app_users", {
+    select: "user_id,email",
+    email: `eq.${email}`,
+    limit: "2",
+  });
+  const emailOwner = existingEmailRows.find((row) =>
+    normalizeText(row.user_id) !== normalizeText(currentUser.user_id)
+  );
+  if (emailOwner) {
+    return { status: "Error", message: "อีเมลนี้ถูกใช้งานแล้ว" } as JsonObject;
+  }
+
+  const nowText = formatThaiDateTime(new Date());
+  await patchSupabaseRows(
+    "app_users",
+    { user_id: `eq.${normalizeText(currentUser.user_id)}` },
+    {
+      email,
+      updated_at_text: nowText,
+    },
+  );
+
+  const refreshedUser = await findUserById(currentUser.user_id);
+  return {
+    status: "Success",
+    message: "บันทึกอีเมลเรียบร้อยแล้ว",
+    email,
+    user: mapUserRowForClient(refreshedUser),
+  } as JsonObject;
+};
+
+const adminUpdateUserAccount = async (payload: RpcPayload) => {
+  const { session } = await resolveSession(payload);
+  requirePermission(session, "users.manage", "ไม่มีสิทธิ์จัดการผู้ใช้งาน");
+
+  const rawArg = payload.args?.[0];
+  const form = typeof rawArg === "string"
+    ? normalizeSettingsInputObject(JSON.parse(rawArg || "{}"))
+    : normalizeSettingsInputObject(rawArg);
+  const targetUserId = normalizeText(form.userId);
+  if (!targetUserId) {
+    return { status: "Error", message: "ไม่พบรหัสผู้ใช้ที่ต้องการแก้ไข" } as JsonObject;
+  }
+
+  const targetUser = await findUserById(targetUserId);
+  if (!targetUser) {
+    return { status: "Error", message: "ไม่พบบัญชีผู้ใช้ที่ต้องการแก้ไข" } as JsonObject;
+  }
+
+  const nextRole = normalizeRole(form.role || targetUser.role || "staff");
+  const nextStatus = normalizeUserStatus(form.status || targetUser.status);
+  const nextFullName = normalizeHumanNamePart(form.fullName) ||
+    normalizeText(targetUser.full_name);
+  const nextPermissionsJson = sanitizePermissionsJsonText(
+    form.permissionsJson !== undefined
+      ? form.permissionsJson
+      : targetUser.permissions_json,
+  );
+
+  if (!nextFullName) {
+    return { status: "Error", message: "กรุณาระบุชื่อ-สกุลของผู้ใช้" } as JsonObject;
+  }
+  if (normalizeText(session.userId) === targetUserId) {
+    if (nextStatus !== USER_STATUS_ACTIVE) {
+      return {
+        status: "Error",
+        message: "ไม่อนุญาตให้ระงับบัญชีที่กำลังใช้งานอยู่ของตนเอง",
+      } as JsonObject;
+    }
+    if (normalizeRole(targetUser.role) === "admin" && nextRole !== "admin") {
+      return {
+        status: "Error",
+        message: "ไม่อนุญาตให้ลดสิทธิ์ผู้ดูแลของบัญชีที่กำลังใช้งานอยู่",
+      } as JsonObject;
+    }
+  }
+
+  if (
+    normalizeRole(targetUser.role) === "admin" &&
+    (nextRole !== "admin" || nextStatus !== USER_STATUS_ACTIVE)
+  ) {
+    const activeAdminRows = await callSupabase("app_users", {
+      select: "user_id",
+      role: "eq.admin",
+      status: `eq.${USER_STATUS_ACTIVE}`,
+      limit: "5000",
+    });
+    const remainingAdmins = activeAdminRows.filter((row) =>
+      normalizeText(row.user_id) !== targetUserId
+    );
+    if (remainingAdmins.length <= 0) {
+      return {
+        status: "Error",
+        message: "ต้องมีผู้ดูแลระบบที่ใช้งานได้อย่างน้อย 1 บัญชีเสมอ",
+      } as JsonObject;
+    }
+  }
+
+  const nowText = formatThaiDateTime(new Date());
+  await patchSupabaseRows(
+    "app_users",
+    { user_id: `eq.${targetUserId}` },
+    {
+      full_name: nextFullName,
+      role: nextRole,
+      status: nextStatus,
+      permissions_json: nextPermissionsJson,
+      updated_at_text: nowText,
+    },
+  );
+
+  const updatedUser = await findUserById(targetUserId);
+  await appendAuditLogEntry(session, {
+    action: "ADMIN_UPDATE_USER",
+    entityType: "USER",
+    entityId: targetUserId,
+    referenceNo: normalizeText(targetUser.username),
+    before: mapUserRowForClient(targetUser),
+    after: mapUserRowForClient(updatedUser),
+    details: "แก้ไขสิทธิ์/สถานะผู้ใช้งานโดยผู้ดูแลระบบ",
+  });
+
+  return {
+    status: "Success",
+    message: "บันทึกข้อมูลผู้ใช้เรียบร้อยแล้ว",
+    user: mapUserRowForClient(updatedUser),
+  } as JsonObject;
 };
 
 const verifyLoginPin = async (payload: RpcPayload) => {
@@ -3944,6 +4379,16 @@ const handlers: Record<string, (payload: RpcPayload) => Promise<Response>> = {
       );
     }
   },
+  async verifyLogin(payload) {
+    try {
+      return success(await verifyLogin(payload));
+    } catch (error) {
+      return appError(
+        (error as Error)?.message || "เข้าสู่ระบบไม่สำเร็จ",
+        "VERIFY_LOGIN_FAILED",
+      );
+    }
+  },
   async verifyLoginPin(payload) {
     try {
       return success(await verifyLoginPin(payload));
@@ -3951,6 +4396,36 @@ const handlers: Record<string, (payload: RpcPayload) => Promise<Response>> = {
       return appError(
         (error as Error)?.message || "เข้าสู่ระบบไม่สำเร็จ",
         "VERIFY_LOGIN_PIN_FAILED",
+      );
+    }
+  },
+  async registerUser(payload) {
+    try {
+      return success(await registerUser(payload));
+    } catch (error) {
+      return appError(
+        (error as Error)?.message || "สมัครใช้งานไม่สำเร็จ",
+        "REGISTER_USER_FAILED",
+      );
+    }
+  },
+  async updateCurrentUserProfile(payload) {
+    try {
+      return success(await updateCurrentUserProfile(payload));
+    } catch (error) {
+      return appError(
+        (error as Error)?.message || "อัปเดตข้อมูลผู้ใช้ไม่สำเร็จ",
+        "UPDATE_CURRENT_USER_PROFILE_FAILED",
+      );
+    }
+  },
+  async adminUpdateUserAccount(payload) {
+    try {
+      return success(await adminUpdateUserAccount(payload));
+    } catch (error) {
+      return appError(
+        (error as Error)?.message || "บันทึกข้อมูลผู้ใช้ไม่สำเร็จ",
+        "ADMIN_UPDATE_USER_ACCOUNT_FAILED",
       );
     }
   },
